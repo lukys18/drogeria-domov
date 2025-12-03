@@ -1,0 +1,716 @@
+ <!DOCTYPE html>
+<html lang="sk">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>TEST E-shop Asistent</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="bot.css">
+  <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+  <script type="text/javascript">
+    (function(){
+      emailjs.init({
+        publicKey: "a6gl1J8IimvAROxcE",
+      });
+    })();
+  </script>
+</head>
+<body>
+  <div id="chatbot-container" class="closed">
+    <div id="chatbot-header" onclick="toggleChatbot()">
+      <!-- Kompletný režim (otvorený) -->
+      <div class="user-info">
+        <div class="avatar-wrapper">
+          <img src="ragnetiq logo.png" alt="TEST Asistent">
+          <div class="status-indicator"></div>
+        </div>
+        <div class="user-details">
+          <div class="user-name">TEST Asistent</div>
+          <div class="user-status">Online</div>
+        </div>
+      </div>
+      
+      <span id="toggle-icon">+</span>
+    </div>
+
+    <!-- Header pre zatvorený stav -->
+    <div id="chatbot-header-closed" onclick="toggleChatbot()" style="display: none;">
+      <img src="ragnetiq logo.png" alt="TEST Asistent" style="height:40px; width:40px; border-radius:50%; object-fit:cover;">
+    </div>
+
+    <div id="chatbot-body">
+      <div id="chat-messages">
+        <!-- Úvodná správa bude pridaná cez JavaScript -->
+      </div>
+      <div id="input-area">
+        <textarea id="user-input" placeholder="Napíšte správu..."></textarea>
+        <button onclick="sendMessage()"><i class="fas fa-paper-plane"></i></button>
+      </div>
+    </div>
+  </div>
+
+
+
+
+  
+<script src="database.js"></script>
+<script src="rag-system.js"></script>
+
+  <script>
+    let chatHistory = [
+      {
+        role: "system",
+        content: "Si TEST - priateľský a nápomocný AI asistent e-shopu. DÔLEŽITÉ PRAVIDLÁ: 1) POUŽÍVAJ INFORMÁCIE Z KONTEXTU - produkty, ceny, dostupnosť zo Shopify. 2) Pri produktoch VŽDY uveď: názov, cenu, dostupnosť (skladom/vypredané). 3) Ak je produkt v zľave, zdôrazni pôvodnú a novú cenu. 4) Ak produkt nie je skladom, ponúkni podobné alternatívy. 5) Pomáhaj zákazníkom nájsť správny produkt - pýtaj sa na ich potreby. 6) Pri dotazoch na veľkosť/farbu ponúkni dostupné varianty. 7) Odpovedaj priateľsky, profesionálne a stručne. 8) PAMÄTAJ SI celú konverzáciu. 9) Ak nemáš informácie, povedz že produkty sa načítavajú alebo odporuč kontaktovať podporu. 10) Pri odporúčaniach vysvetli PREČO produkt odporúčaš."
+      }
+    ];
+
+    // Session management
+    let sessionId = null;
+    let messageIndex = 0;
+    let emailSubmittedInSession = false; // Track if email was submitted in this session
+
+    // Generate NEW session ID every time (on page load/refresh)
+    function getSessionId() {
+      if (!sessionId) {
+        // Always generate new UUID for each browser session/refresh
+        sessionId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+          const r = Math.random() * 16 | 0;
+          const v = c == 'x' ? r : (r & 0x3 | 0x8);
+          return v.toString(16);
+        });
+        console.log('🆔 New session created:', sessionId);
+      }
+      return sessionId;
+    }
+
+    // Mark that email was submitted in this session
+    function markEmailSubmittedForSession() {
+      emailSubmittedInSession = true;
+      console.log('📧 Email submitted flag set to TRUE for session:', sessionId);
+    }
+
+    // Inicializácia RAG systému po načítaní databázy
+    let ragSystem = null;
+    document.addEventListener('DOMContentLoaded', function() {
+      // Initialize session
+      getSessionId();
+      
+      if (window.aiPowerData && window.RAGSystem) {
+        ragSystem = new window.RAGSystem(window.aiPowerData.knowledgeBase);
+        console.log('RAG systém inicializovaný s', window.aiPowerData.knowledgeBase.length, 'záznamami');
+      }
+      
+      // Zobrazenie úvodnej správy
+      appendMessage("TEST", "Ahoj! 👋 Som váš e-shop asistent. Pomôžem vám nájsť produkty, skontrolovať dostupnosť alebo zodpovedať vaše otázky. Čo hľadáte?", "bot", false, false, false);
+      const quickRepliesDiv = document.createElement('div');
+      quickRepliesDiv.className = 'quick-replies';
+      quickRepliesDiv.innerHTML = `
+        <button class="quick-reply-btn" onclick="handleQuickReply('Čo máte v ponuke?')">Produkty</button>
+        <button class="quick-reply-btn" onclick="handleQuickReply('Máte nejaké zľavy?')">Akcie</button>
+        <button class="quick-reply-btn" onclick="handleQuickReply('Aké sú možnosti dopravy?')">Doprava</button>
+        <button class="quick-reply-btn" onclick="handleQuickReply('Ako môžem vrátiť tovar?')">Vrátenie</button>
+        <button class="quick-reply-btn" onclick="handleQuickReply('Kontakt')">Kontakt</button>
+      `;
+      chatbox.appendChild(quickRepliesDiv);
+    });
+
+    const chatbox = document.getElementById("chat-messages");
+    const inputField = document.getElementById("user-input");
+
+    // Detekcia iframe a pridanie triedy
+    if (window.self !== window.top) {
+      document.body.classList.add('iframe-mode');
+    }
+
+    // Informuj parent, že je chatbot na začiatku zatvorený
+    if (window.parent !== window) {
+      window.parent.postMessage({ type: "chatbot-closed" }, "*");
+    }
+
+    // Listener pre resize správy z widgetu
+    window.addEventListener("message", function(event) {
+      if (event.data.type === "resize") {
+        // Donúti prehliadač prepočítať layout
+        window.dispatchEvent(new Event("resize"));
+      }
+    });
+
+    // Event listener pre Enter a Shift+Enter
+    inputField.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault(); // Zabráni štandardnému správaniu (nový riadok)
+        sendMessage(); // Odošle správu
+      }
+      // Shift+Enter vytvorí nový riadok (štandardné správanie textarea)
+    });
+
+    function toggleChatbot() {
+      const container = document.getElementById("chatbot-container");
+      const openHeader = document.getElementById("chatbot-header");
+      const closedHeader = document.getElementById("chatbot-header-closed");
+      const icon = document.getElementById("toggle-icon");
+      
+      container.classList.toggle("closed");
+      
+      if (container.classList.contains("closed")) {
+        // Zatvorený stav
+        openHeader.style.display = "none";
+        closedHeader.style.display = "block";
+        // Informuj parent o zatvorení
+        if (window.parent !== window) {
+          window.parent.postMessage({ type: "chatbot-closed" }, "*");
+        }
+      } else {
+        // Otvorený stav
+        openHeader.style.display = "flex";
+        closedHeader.style.display = "none";
+        icon.innerText = "−";
+        // Informuj parent o otvorení
+        if (window.parent !== window) {
+          window.parent.postMessage({ type: "chatbot-opened" }, "*");
+        }
+      }
+    }
+
+    function createContactForm() {
+      const formId = 'contact-form-' + Date.now(); // Unikátne ID pre každý formulár
+      return `
+        <div class="contact-form">
+          <h4>Pošlite nám správu</h4>
+          <form id="${formId}" onsubmit="handleContactSubmit(event, '${formId}')">
+            <div class="form-group">
+              <label for="${formId}-name">Meno *</label>
+              <input type="text" id="${formId}-name" name="from_name" placeholder="Vaše meno" required>
+            </div>
+            <div class="form-group">
+              <label for="${formId}-email">Email *</label>
+              <input type="email" id="${formId}-email" name="from_email" placeholder="vas@email.com" required>
+            </div>
+            <div class="form-group">
+              <label for="${formId}-message">Správa *</label>
+              <textarea id="${formId}-message" name="message" placeholder="Opíšte vašu otázku alebo požiadavku..." required></textarea>
+            </div>
+            <button type="submit" class="form-submit-btn" id="${formId}-submit">
+              Odoslať správu
+            </button>
+          </form>
+        </div>
+      `;
+    }
+
+    function handleContactSubmit(event, formId) {
+      event.preventDefault();
+      
+      // Získanie tlačidla a formulára
+      const submitBtn = document.getElementById(formId + '-submit');
+      const form = document.getElementById(formId);
+      
+      // Disable tlačidlo a zmena textu
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = 'Odosielam...';
+      
+      // EmailJS configuration
+      emailjs.sendForm('service_1mgr3un', 'template_pfpr23k', '#' + formId)
+        .then(
+          (response) => {
+            console.log('SUCCESS!', response.status, response.text);
+            
+            // Úspešná správa
+            const botSuccessMessage = "🎉 **Ďakujeme!** Vaša správa bola úspešne odoslaná. Odpovieme vám čo najskôr.";
+            appendMessage("TEST", botSuccessMessage, "bot");
+            
+            // ============================================================
+            // MARK SESSION AS EMAIL SUBMITTED & SAVE TO DATABASE
+            // ============================================================
+            markEmailSubmittedForSession();
+            
+            // Increment message index for email event
+            messageIndex++;
+            
+            // Save email submission event to database with proper message index
+            saveEmailEventToAPI(botSuccessMessage, messageIndex);
+            
+            // Skryť formulár po úspešnom odoslaní
+            const formContainer = form.closest('.contact-form').parentElement;
+            if (formContainer) {
+              formContainer.style.display = 'none';
+            }
+          },
+          (error) => {
+            console.log('FAILED...', error);
+            
+            // Chybová správa
+            appendMessage("TEST", "❌ **Ups!** Nastala chyba pri odosielaní správy. Skúste to prosím znovu alebo nás kontaktujte priamo.", "bot");
+            
+            // Obnoviť tlačidlo
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = 'Odoslať správu';
+          }
+        );
+    }
+
+    function showContactForm(buttonElement) {
+      // Skry tlačidlo
+      buttonElement.style.display = 'none';
+      
+      // Vytvor a zobraz formulár
+      const contactFormDiv = document.createElement('div');
+      contactFormDiv.innerHTML = createContactForm();
+      
+      // Pridaj formulár za tlačidlo
+      buttonElement.parentNode.insertBefore(contactFormDiv, buttonElement.nextSibling);
+      
+      // Scroll na spodok
+      chatbox.scrollTop = chatbox.scrollHeight;
+    }
+
+    function handleQuickReply(question) {
+      // Nastav otázku do input fieldu a odošli ju
+      inputField.value = question;
+      sendMessage();
+    }
+
+    function delay(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+   
+
+async function sendMessage() {
+  const message = inputField.value.trim();
+  if (!message) return;
+
+  appendMessage("Ty", message, "user");
+  inputField.value = "";
+
+  // Increment message index
+  messageIndex++;
+  const currentMessageIndex = messageIndex;
+  
+  // Start timer for response time
+  const startTime = Date.now();
+
+  // Pridaj používateľskú správu do histórie
+  chatHistory.push({ role: "user", content: message });
+
+  // Zobraz typing animáciu
+  appendMessage("TEST", "typing", "bot", true);
+
+  try {
+    await delay(800);
+
+    // RAG vyhľadávanie relevantného obsahu
+    let relevantContent = [];
+    let ragContext = '';
+    let sources = [];
+    let useRAG = false;
+    let detectedCategory = 'všeobecné'; // Default category
+    let isProductQuery = false;
+
+    if (ragSystem) {
+      // Kontrola či je to produktový dotaz
+      isProductQuery = ragSystem.isProductQuery(message);
+      const productIntent = ragSystem.detectProductIntent(message);
+      
+      relevantContent = ragSystem.searchRelevantContent(message, 3);
+      if (relevantContent.length > 0) {
+        ragContext = ragSystem.buildContext(relevantContent);
+        sources = relevantContent.map(item => item.title);
+        useRAG = true;
+        
+        // Determine category based on highest scoring RAG result
+        if (relevantContent[0] && relevantContent[0].title) {
+          const topResult = relevantContent[0].title.toLowerCase();
+          
+          if (topResult.includes('produkt') || topResult.includes('tovar') || isProductQuery) {
+            detectedCategory = 'produkty';
+          } else if (topResult.includes('cen') || topResult.includes('zlav') || topResult.includes('akci')) {
+            detectedCategory = 'ceny';
+          } else if (topResult.includes('kontakt') || topResult.includes('podpora')) {
+            detectedCategory = 'kontakt';
+          } else if (topResult.includes('doprav') || topResult.includes('doruc')) {
+            detectedCategory = 'doprava';
+          } else if (topResult.includes('vrat') || topResult.includes('reklam')) {
+            detectedCategory = 'reklamácie';
+          }
+        }
+        
+        console.log('Používam RAG s kontextom:', sources);
+        console.log('📊 Detekovaná kategória z RAG:', detectedCategory);
+        console.log('🛒 Je produktový dotaz:', isProductQuery, '| Intent:', productIntent);
+      }
+    }
+    
+    // Fallback: Use keyword-based categorization if RAG didn't find anything
+    if (!useRAG) {
+      detectedCategory = categorizeMessage(message);
+    }
+
+    // API volanie s kompletnou históriou a RAG kontextom
+    // RAG kontext bude vložený na serveri ako system správa pred poslednú user správu
+    const response = await fetch("/api/chat", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ 
+        messages: chatHistory, // Celá história konverzácie
+        useRAG: useRAG,
+        ragContext: ragContext,
+        sources: sources,
+        isProductQuery: isProductQuery
+      })
+    });
+
+    if (!response.ok) {
+     throw new Error(`Chyba ${response.status}: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    let reply = data.choices?.[0]?.message?.content?.trim() || "Prepáč, neviem na to odpovedať.";
+
+    // Calculate response time
+    const timeToRespond = Date.now() - startTime;
+    
+    // Use RAG-detected category (already set above)
+    const category = detectedCategory;
+
+    // Kontrola či odpoveď obsahuje "nemám presné informácie" alebo podobné frázy
+    const isInsufficientAnswer = reply.includes("nemám presné informácie") || 
+                                reply.includes("kontaktujte nás") ||
+                                reply.includes("neviem na to odpovedať") ||
+                                reply.includes("nemám dostatok informácií");
+
+    // Kontrola či odpoveď obsahuje kontaktné informácie
+    const isContactRelated = reply.includes("kontakt") || 
+                            reply.includes("telefón") || 
+                            reply.includes("email") ||
+                            reply.includes("+421") ||
+                            sources.some(source => source.toLowerCase().includes("kontakt"));
+
+    removeLastBotMessage();
+    appendMessage("TEST", reply, "bot", false, false, isInsufficientAnswer || isContactRelated);
+    
+    // Pridaj odpoveď asistenta do histórie pre budúcu pamäť
+    chatHistory.push({ role: "assistant", content: reply });
+
+    // ============================================================
+    // AUTOMATIC CHAT SAVING TO VERCEL API WITH METRICS
+    // This sends every conversation to your Vercel database endpoint
+    // ============================================================
+    saveChatToAPI(message, reply, currentMessageIndex, timeToRespond, category);
+
+  } catch (error) {
+    console.error("Chyba:", error);
+    removeLastBotMessage();
+    
+    // Fallback pre lokálne testovanie
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      appendMessage("TEST", "Na túto otázku neviem dostatočne odpovedať.", "bot", false, false, true);
+    } else {
+      appendMessage("TEST", `Ups, nastala chyba: ${error.message}`, "bot");
+    }
+  }
+}
+
+/**
+ * Categorizes user message based on keywords
+ * @param {string} message - The user's message
+ * @returns {string} - Category name
+ */
+function categorizeMessage(message) {
+  const lowerMsg = message.toLowerCase();
+  
+  if (lowerMsg.includes('cena') || lowerMsg.includes('koľko') || lowerMsg.includes('stojí') || 
+      lowerMsg.includes('cenník') || lowerMsg.includes('€') || lowerMsg.includes('eur')) {
+    return 'ceny';
+  }
+  if (lowerMsg.includes('kontakt') || lowerMsg.includes('email') || lowerMsg.includes('telefón') || 
+      lowerMsg.includes('podpora') || lowerMsg.includes('pomoc')) {
+    return 'kontakt';
+  }
+  if (lowerMsg.includes('produkt') || lowerMsg.includes('tovar') || lowerMsg.includes('hľadám') || 
+      lowerMsg.includes('máte') || lowerMsg.includes('ponúkate') || lowerMsg.includes('odporúč')) {
+    return 'produkty';
+  }
+  if (lowerMsg.includes('skladom') || lowerMsg.includes('dostupn') || lowerMsg.includes('k dispozícii')) {
+    return 'dostupnosť';
+  }
+  if (lowerMsg.includes('doprav') || lowerMsg.includes('doručen') || lowerMsg.includes('poštovn')) {
+    return 'doprava';
+  }
+  if (lowerMsg.includes('vráti') || lowerMsg.includes('reklamác') || lowerMsg.includes('výmen')) {
+    return 'reklamácie';
+  }
+  if (lowerMsg.includes('zľav') || lowerMsg.includes('akci') || lowerMsg.includes('promo') || 
+      lowerMsg.includes('kupón')) {
+    return 'zľavy';
+  }
+  
+  return 'všeobecné';
+}
+
+/**
+ * Saves chat interaction to Vercel API endpoint with enhanced metrics
+ * @param {string} userMessage - The user's message
+ * @param {string} botResponse - The bot's response
+ * @param {number} messageIndex - Index of message in session
+ * @param {number} timeToRespond - Response time in milliseconds
+ * @param {string} category - Message category
+ */
+async function saveChatToAPI(userMessage, botResponse, messageIndex, timeToRespond, category) {
+  try {
+    // Get the current website's hostname
+    const website = window.location.hostname;
+    
+    // Get session ID
+    const currentSessionId = getSessionId();
+    
+    // Get user's IP address and geolocation
+    let ipAddress = null;
+    let geoLocationCity = null;
+    
+    try {
+      // Get IP address
+      const ipResponse = await fetch('https://api.ipify.org?format=json');
+      if (ipResponse.ok) {
+        const ipData = await ipResponse.json();
+        ipAddress = ipData.ip;
+        
+        // Get geolocation based on IP
+        try {
+          const geoResponse = await fetch(`https://ipapi.co/${ipAddress}/json/`);
+          if (geoResponse.ok) {
+            const geoData = await geoResponse.json();
+            geoLocationCity = geoData.city || null;
+            console.log('📍 Location detected:', geoLocationCity);
+          }
+        } catch (geoError) {
+          console.warn('Could not fetch geolocation:', geoError.message);
+        }
+      }
+    } catch (ipError) {
+      console.warn('Could not fetch IP address:', ipError.message);
+    }
+    
+    // Call the Vercel API endpoint to save the chat
+    const response = await fetch('https://ragnetiq-bot.vercel.app/api/saveChat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        userMessage: userMessage,
+        botResponse: botResponse,
+        website: website,
+        ipAddress: ipAddress,
+        sessionId: currentSessionId,
+        messageIndex: messageIndex,
+        timeToRespond: timeToRespond,
+        category: category,
+        geoLocationCity: geoLocationCity,
+        emailSubmitted: emailSubmittedInSession  // Boolean flag from session
+      })
+    });
+
+    // Check if the save was successful
+    if (response.ok) {
+      console.log('✅ Chat saved successfully to database');
+    } else {
+      // Log error but don't interrupt the user experience
+      console.warn('⚠️ Failed to save chat:', response.status, response.statusText);
+    }
+  } catch (error) {
+    // Handle errors gracefully - log to console but don't show to user
+    console.error('❌ Error saving chat to API:', error.message);
+  }
+}
+
+/**
+ * Saves email form submission event to database
+ * This is called immediately after successful email sending
+ * @param {string} botSuccessMessage - The success message shown to user
+ * @param {number} emailMessageIndex - The message index for this email event
+ */
+async function saveEmailEventToAPI(botSuccessMessage, emailMessageIndex) {
+  try {
+    const website = window.location.hostname;
+    const currentSessionId = getSessionId();
+    
+    // Get user's IP address and geolocation
+    let ipAddress = null;
+    let geoLocationCity = null;
+    
+    try {
+      const ipResponse = await fetch('https://api.ipify.org?format=json');
+      if (ipResponse.ok) {
+        const ipData = await ipResponse.json();
+        ipAddress = ipData.ip;
+        
+        try {
+          const geoResponse = await fetch(`https://ipapi.co/${ipAddress}/json/`);
+          if (geoResponse.ok) {
+            const geoData = await geoResponse.json();
+            geoLocationCity = geoData.city || null;
+          }
+        } catch (geoError) {
+          console.warn('Could not fetch geolocation:', geoError.message);
+        }
+      }
+    } catch (ipError) {
+      console.warn('Could not fetch IP address:', ipError.message);
+    }
+    
+    // Call the Vercel API endpoint to save the email event
+    const response = await fetch('https://ragnetiq-bot.vercel.app/api/saveChat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        userMessage: 'Správa poslaná',
+        botResponse: botSuccessMessage,
+        website: website,
+        ipAddress: ipAddress,
+        sessionId: currentSessionId,
+        messageIndex: emailMessageIndex, // Proper sequential message index
+        timeToRespond: null,
+        category: 'Email',
+        geoLocationCity: geoLocationCity,
+        emailSubmitted: true
+      })
+    });
+
+    if (response.ok) {
+      console.log('✅ Email event saved to database (index:', emailMessageIndex + ')');
+    } else {
+      console.warn('⚠️ Failed to save email event:', response.status, response.statusText);
+    }
+  } catch (error) {
+    console.error('❌ Error saving email event to API:', error.message);
+  }
+}
+
+
+
+
+
+    function appendMessage(sender, message, role, isTemp = false, showQuickReplies = false, showContactButton = false) {
+      const msgDiv = document.createElement("div");
+      msgDiv.classList.add("message", role);
+      if (isTemp) msgDiv.classList.add("temp");
+
+      // Ak je to typing animácia, pridaj špeciálny obsah
+      if (isTemp && message === "typing") {
+        msgDiv.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+      } else {
+        // Spracovanie **text** na <strong>text</strong>
+        let formattedMessage = message.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        
+        // Automatické vytvorenie hyperlinkov z URL
+        formattedMessage = formattedMessage.replace(
+          /(https?:\/\/[^\s<]+)(?![^<]*>)/g,
+          '<a href="$1" target="_blank">$1</a>'
+        );
+
+        msgDiv.innerHTML = formattedMessage;
+      }
+
+      chatbox.appendChild(msgDiv);
+      
+      // Pridaj kontaktné tlačidlo ak je potrebné
+      if (role === 'bot' && showContactButton) {
+        const browserLang = navigator.language || navigator.userLanguage;
+        const isEnglishBrowser = browserLang.startsWith('en');
+        const buttonText = isEnglishBrowser ? "Send us a message" : "Pošli nám správu";
+        
+        const contactBtnDiv = document.createElement('div');
+        contactBtnDiv.innerHTML = `
+          <button class="contact-btn" onclick="showContactForm(this)">
+            ${buttonText}
+          </button>
+        `;
+        chatbox.appendChild(contactBtnDiv);
+      }
+      
+      // Pridaj Quick Reply buttony pod správu (nie do nej)
+      if (role === 'bot' && showQuickReplies) {
+        const quickRepliesDiv = document.createElement('div');
+        quickRepliesDiv.className = 'quick-replies';
+        quickRepliesDiv.innerHTML = `
+          <button class="quick-reply-btn" onclick="handleQuickReply('Koľko to stojí?')">Cenník</button>
+          <button class="quick-reply-btn" onclick="handleQuickReply('Ktorý balík si mám vybrať?')">Ktorý balík?</button>
+          <button class="quick-reply-btn" onclick="handleQuickReply('Rezervácia stretnutia')">Konzultácia</button>
+          <button class="quick-reply-btn" onclick="handleQuickReply('Ako dlho trvá vytvorenie?')">Čas realizácie</button>
+          <button class="quick-reply-btn" onclick="handleQuickReply('Kontakt')">Kontakt</button>
+        `;
+        chatbox.appendChild(quickRepliesDiv);
+      }
+
+      chatbox.scrollTop = chatbox.scrollHeight;
+    }
+
+    function removeLastBotMessage() {
+      const tempMsg = chatbox.querySelector(".bot.temp");
+      if (tempMsg) chatbox.removeChild(tempMsg);
+    }
+
+
+
+
+
+
+
+    
+  </script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
