@@ -126,19 +126,23 @@ async function getProductContextFromCache(query, host) {
     const queryWords = normalizedQuery.split(/\s+/).filter(w => w.length > 2);
 
     // Vyhľadaj relevantné produkty
-    let relevantProducts = products.filter(product => {
-      const searchText = normalizeText(
-        `${product.title} ${product.description} ${product.product_type} ${product.vendor} ${(product.tags || []).join(' ')}`
-      );
-      
-      return queryWords.some(word => searchText.includes(word));
-    });
+    let relevantProducts = [];
+    
+    if (queryWords.length > 0) {
+      relevantProducts = products.filter(product => {
+        const searchText = normalizeText(
+          `${product.title} ${product.description} ${product.product_type} ${product.vendor} ${(product.tags || []).join(' ')}`
+        );
+        
+        return queryWords.some(word => searchText.includes(word));
+      });
+    }
 
-    // Ak máme menej ako 3 výsledky, pridaj najpredávanejšie/dostupné
-    if (relevantProducts.length < 3) {
+    // Ak nemáme výsledky alebo je to všeobecný dotaz, pridaj náhodné dostupné produkty
+    if (relevantProducts.length < 5) {
       const availableProducts = products
-        .filter(p => p.available && !relevantProducts.includes(p))
-        .slice(0, 5 - relevantProducts.length);
+        .filter(p => p.available && !relevantProducts.some(r => r.id === p.id))
+        .slice(0, 10 - relevantProducts.length);
       relevantProducts = [...relevantProducts, ...availableProducts];
     }
 
