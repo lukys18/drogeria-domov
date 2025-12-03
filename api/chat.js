@@ -17,15 +17,13 @@ export default async function handler(req, res) {
     let enhancedMessages = [...messages];
     let productContext = '';
     
-    // Ak je to produktový dotaz, načítaj produkty z cache
-    if (isProductQuery) {
-      try {
-        const lastUserMessage = getLastUserMessage(messages);
-        productContext = await getProductContextFromCache(lastUserMessage, req.headers.host);
-        console.log('📦 Product context loaded from cache');
-      } catch (productError) {
-        console.warn('Could not fetch product data:', productError.message);
-      }
+    // VŽDY načítaj produkty z cache pre každý dotaz
+    try {
+      const lastUserMessage = getLastUserMessage(messages);
+      productContext = await getProductContextFromCache(lastUserMessage, req.headers.host);
+      console.log('📦 Product context loaded:', productContext ? 'YES' : 'NO');
+    } catch (productError) {
+      console.warn('Could not fetch product data:', productError.message);
     }
     
     // Kombinuj RAG kontext s produktovým kontextom
