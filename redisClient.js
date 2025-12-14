@@ -107,10 +107,9 @@ export async function searchProducts(query, options = {}) {
   const minScore = queryTerms.length * 3;
   
   // Detekcia cieľovej skupiny v dotaze
-  const queryLower = normalizedQuery;
-  const forWomen = /(\bpre zeny\b|\bzeny\b|\bzena\b|\bzensky\b|\bdamsk)/i.test(queryLower);
-  const forMen = /(\bpre muzov\b|\bmuzov\b|\bmuz\b|\bmuzsky\b|\bpansk)/i.test(queryLower);
-  const forKids = /(\bpre deti\b|\bdeti\b|\bdetsk|\bdieta\b|\bbaby\b)/i.test(queryLower);
+  const forWomen = /(\bpre zeny\b|\bzeny\b|\bzena\b|\bzensky\b|\bdamsk)/i.test(normalizedQuery);
+  const forMen = /(\bpre muzov\b|\bmuzov\b|\bmuz\b|\bmuzsky\b|\bpansk)/i.test(normalizedQuery);
+  const forKids = /(\bpre deti\b|\bdeti\b|\bdetsk|\bdieta\b|\bbaby\b)/i.test(normalizedQuery);
   
   console.log('👥 Cieľová skupina:', { forWomen, forMen, forKids });
   console.log('💄 Hľadá make-up produkty:', wantsMakeup);
