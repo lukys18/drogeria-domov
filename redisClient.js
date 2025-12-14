@@ -33,23 +33,36 @@ export async function searchProducts(query, options = {}) {
     onlyAvailable = true 
   } = options;
   
+  console.log('🔎 searchProducts volaný s:', { query, options });
+  
   const redis = getRedisClient();
   
   const normalizedQuery = normalizeText(query);
   const queryTerms = normalizedQuery.split(/\s+/).filter(w => w.length >= 2);
   
+  console.log('🔤 Normalizovaný query:', normalizedQuery);
+  console.log('🔤 Query termy:', queryTerms);
+  
   if (queryTerms.length === 0) {
-    return { products: [], total: 0, query: query };
+    console.log('⚠️ Žiadne platné termy, vraciam prázdny výsledok');
+    return { products: [], total: 0, query: query, matchedTerms: [] };
   }
   
   const N = parseInt(await redis.get('products:count')) || 1;
   const avgDocLen = parseFloat(await redis.get('products:avgDocLen')) || 10;
   
+  console.log('📊 Databáza:', { produktov: N, priemerDĺžkaDok: avgDocLen });
+  
   const wordIndex = {};
+  const matchedTerms = [];
   for (const term of queryTerms) {
     const data = await redis.hget('idx:words', term);
     if (data) {
       wordIndex[term] = typeof data === 'string' ? JSON.parse(data) : data;
+      matchedTerms.push(term);
+      console.log(`✅ Term "${term}" nájdený v indexe, ${Object.keys(wordIndex[term]).length} dokumentov`);
+    } else {
+      console.log(`❌ Term "${term}" NENÁJDENÝ v indexe`);
     }
   }
   
@@ -61,6 +74,8 @@ export async function searchProducts(query, options = {}) {
       }
     }
   }
+  
+  console.log('📋 Kandidáti na produkty:', candidateIds.size);
   
   if (category) {
     const catData = await redis.hget('idx:categories', normalizeText(category));
@@ -79,7 +94,8 @@ export async function searchProducts(query, options = {}) {
   }
   
   if (candidateIds.size === 0) {
-    return { products: [], total: 0, query: query };
+    console.log('⚠️ Žiadni kandidáti, vraciam prázdny výsledok');
+    return { products: [], total: 0, query: query, matchedTerms: [] };
   }
   
   const docLengths = {};
@@ -129,11 +145,18 @@ export async function searchProducts(query, options = {}) {
     }
   }
   
+  console.log('📊 Výsledky vyhľadávania:', {
+    celkovo: scores.length,
+    vrátených: products.length,
+    matchedTerms: matchedTerms,
+    topProdukty: products.slice(0, 3).map(p => ({ title: p.title, score: p._score?.toFixed(2) }))
+  });
+  
   return {
     products,
     total: scores.length,
     query: query,
-    matchedTerms: queryTerms.filter(t => wordIndex[t])
+    matchedTerms: matchedTerms
   };
 }
 

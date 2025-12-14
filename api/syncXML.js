@@ -169,15 +169,35 @@ function transformProduct(raw) {
 }
 
 async function saveProductsAndBuildIndex(redis, products) {
-  // Vymaž staré dáta
+  console.log('🧹 Začínam čistenie starých dát...');
+  
+  // Vymaž VŠETKY staré dáta - kompletný reset
   const oldIds = await redis.smembers('products:ids') || [];
+  console.log(`🗑️ Mažem ${oldIds.length} starých produktov`);
+  
   if (oldIds.length > 0) {
-    const pipeline = redis.pipeline();
-    for (const id of oldIds) {
-      pipeline.del(`p:${id}`);
+    // Maž v dávkach po 100
+    for (let i = 0; i < oldIds.length; i += 100) {
+      const batch = oldIds.slice(i, i + 100);
+      const pipeline = redis.pipeline();
+      for (const id of batch) {
+        pipeline.del(`p:${id}`);
+      }
+      await pipeline.exec();
     }
-    await pipeline.exec();
   }
+  
+  // Vymaž všetky indexy
+  console.log('🗑️ Mažem staré indexy...');
+  await redis.del('products:ids');
+  await redis.del('products:count');
+  await redis.del('products:avgDocLen');
+  await redis.del('idx:words');
+  await redis.del('idx:categories');
+  await redis.del('idx:brands');
+  await redis.del('idx:docLengths');
+  
+  console.log('✅ Staré dáta vymazané, začínam ukladať nové produkty...');
   
   const wordIndex = new Map();
   const categoryIndex = new Map();

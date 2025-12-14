@@ -10,24 +10,30 @@ const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
 // Systémový prompt pre konverzačného asistenta
 const SYSTEM_PROMPT = `Si priateľský asistent online drogérie Drogéria Domov (drogeriadomov.sk).
 
-KRITICKÉ PRAVIDLO:
-Môžeš odporúčať IBA produkty, ktoré sú uvedené v sekcii "NÁJDENÉ PRODUKTY" v kontexte.
-Ak tam nie sú žiadne produkty, NIKDY si ich nevymýšľaj - namiesto toho sa opýtaj zákazníka na spresnenie.
+KRITICKÉ PRAVIDLÁ:
+1. Môžeš odporúčať IBA produkty, ktoré sú uvedené v sekcii "NÁJDENÉ PRODUKTY" v kontexte.
+2. Ak tam nie sú žiadne produkty, NIKDY si ich nevymýšľaj - namiesto toho sa opýtaj zákazníka na spresnenie.
+3. Zdraviť (ahoj, dobrý deň) môžeš LEN na prvú správu v konverzácii. Potom už pozdrav vynechaj.
 
 TVOJE ÚLOHY:
 1. Pomáhaj zákazníkom nájsť produkty z ponuky
 2. Pýtaj sa doplňujúce otázky ak je požiadavka príliš všeobecná
 3. Odporúčaj max 3-5 produktov z kontextu
+4. Ak zákazník len poďakuje alebo sa lúči, odpovedz stručne a prívetivo
 
 FORMÁT PRODUKTOV (použi LEN ak máš produkty v kontexte):
 **[Názov z kontextu]** - [Cena z kontextu] €
 [Popis]
 Odkaz: [URL z kontextu - PRESNE ako je uvedený]
 
-AK NEMÁŠ PRODUKTY V KONTEXTE:
+AK NEMÁŠ PRODUKTY V KONTEXTE A ZÁKAZNÍK SA PÝTA NA PRODUKT:
 - Povedz zákazníkovi, že pre lepšie výsledky potrebuješ viac informácií
 - Opýtaj sa na značku, typ produktu, alebo účel použitia
 - NEVYMÝŠĽAJ žiadne produkty ani značky
+
+AK ZÁKAZNÍK NEPÝTA NA PRODUKTY (ďakuje, zdraví, všeobecná otázka):
+- Odpovedz prirodzene a stručne
+- Nepýtaj sa hneď na produkty, ak to nie je relevantné
 
 Odpovedaj VŽDY po slovensky, priateľsky a stručne.`;
 
@@ -52,6 +58,10 @@ export default async function handler(req, res) {
   }
 
   try {
+    console.log('═══════════════════════════════════════════════════════════');
+    console.log('🚀 NOVÁ SPRÁVA:', message);
+    console.log('📜 História:', history.length, 'správ');
+    
     // Analyzuj zámer používateľa
     const intent = analyzeIntent(message);
     console.log(`💬 Správa: "${message}" | Zámer: ${intent.type}`);
@@ -62,11 +72,16 @@ export default async function handler(req, res) {
     // Log pre debug
     console.log('📦 Context products:', context.products?.length || 0);
     if (context.products?.length > 0) {
-      console.log('📦 First product:', context.products[0].title, '|', context.products[0].url);
+      console.log('📦 Nájdené produkty:');
+      context.products.forEach((p, i) => {
+        console.log(`   ${i+1}. ${p.title} | ${p.price}€ | ${p.url}`);
+      });
     }
     
     // Vytvor správy pre AI
     const messages = buildMessages(message, history, context, intent);
+    
+    console.log('🤖 Posielam do AI:', messages.length, 'správ');
     
     // Zavolaj DeepSeek API
     const response = await fetch(DEEPSEEK_API_URL, {
@@ -113,51 +128,85 @@ export default async function handler(req, res) {
 
 // Analýza zámeru používateľa
 function analyzeIntent(message) {
-  const lower = message.toLowerCase();
+  const lower = message.toLowerCase().trim();
+  const words = lower.split(/\s+/).filter(w => w.length >= 2);
   
-  // Pozdrav
-  if (/^(ahoj|dobrý|čau|zdravím|hey|hi|nazdar)/i.test(lower)) {
+  console.log('🧠 Analyzujem zámer:', { message: lower, wordCount: words.length });
+  
+  // Čistý pozdrav (len pozdrav, prípadne s krátkym doplnkom)
+  if (/^(ahoj|dobrý|čau|zdravím|hey|hi|nazdar|cau|dobry)\s*[!.,]?$/i.test(lower) ||
+      /^(ahoj|dobrý|čau|zdravím|hey|hi|nazdar|cau|dobry)\s+(ako sa máš|ako sa máte|čo robíš)?[!.,]?$/i.test(lower)) {
+    console.log('👋 Rozpoznaný zámer: pozdrav');
     return { type: 'greeting' };
+  }
+  
+  // Ďakovanie / rozlúčka
+  if (/^(ďakujem|dakujem|vďaka|dík|díky|diky|super|ok|okej|fajn|dobre|áno|ano|nie|dovidenia|zbohom|ahoj\s*$)/i.test(lower) && words.length <= 3) {
+    console.log('🙏 Rozpoznaný zámer: poďakovanie/rozlúčka');
+    return { type: 'thanks' };
+  }
+  
+  // Všeobecná otázka (nie o produktoch)
+  if (/^(ako|čo|kto|kde|kedy|prečo)\s+(ste|si|to|je|funguje|robíte)/i.test(lower) && 
+      !/produkt|tovar|predávate|máte/i.test(lower)) {
+    console.log('❓ Rozpoznaný zámer: všeobecná otázka');
+    return { type: 'general_question' };
   }
   
   // Zľavy/akcie
   if (/zlav|akci|výpredaj|lacn|znížen|promo/i.test(lower)) {
+    console.log('💰 Rozpoznaný zámer: zľavy');
     return { type: 'discounts' };
   }
   
   // Kategórie
   if (/kategór|sortiment|ponuk|máte|čo predávate/i.test(lower)) {
+    console.log('📂 Rozpoznaný zámer: kategórie');
     return { type: 'categories' };
   }
   
   // Značky
   if (/značk|brand|výrobc/i.test(lower)) {
+    console.log('🏷️ Rozpoznaný zámer: značky');
     return { type: 'brands' };
   }
   
   // Darček
   if (/darček|darovať|pre .*(mamu|otca|priateľ|manžel|dieťa|babičk)/i.test(lower)) {
+    console.log('🎁 Rozpoznaný zámer: darček');
     return { type: 'gift', needsMore: true };
   }
   
-  // Všeobecné kategórie - potrebujú spresnenie
-  const generalCategories = [
+  // Produktové kľúčové slová - jasne hľadá produkt
+  const productKeywords = [
     'šampón', 'mydlo', 'krém', 'parfém', 'dezodorant', 'zubná', 
-    'prací', 'čistiaci', 'kozmetik', 'makeup', 'rúž'
+    'prací', 'čistiaci', 'kozmetik', 'makeup', 'rúž', 'sprchov',
+    'gel', 'pasta', 'pleť', 'vlasy', 'telo', 'ruky', 'tvár',
+    'prášok', 'aviváž', 'wc', 'toaletn', 'papier', 'utierky',
+    'hľadám', 'potrebujem', 'chcem', 'kúpiť', 'kúpi', 'produkt'
   ];
   
-  for (const cat of generalCategories) {
-    if (lower.includes(cat) && lower.split(' ').length < 5) {
-      return { type: 'general_category', category: cat, needsMore: true };
-    }
-  }
+  const hasProductKeyword = productKeywords.some(kw => lower.includes(kw));
   
-  // Konkrétne vyhľadávanie
-  if (lower.split(' ').length >= 2) {
+  if (hasProductKeyword) {
+    // Ak je len 1-2 slová, potrebuje spresnenie
+    if (words.length <= 2) {
+      console.log('📦 Rozpoznaný zámer: všeobecná kategória (potrebuje spresnenie)');
+      return { type: 'general_category', needsMore: true };
+    }
+    console.log('🔍 Rozpoznaný zámer: konkrétne vyhľadávanie produktu');
     return { type: 'specific_search' };
   }
   
-  return { type: 'general' };
+  // Ak má dosť slov, skús to ako vyhľadávanie
+  if (words.length >= 3) {
+    console.log('🔍 Rozpoznaný zámer: vyhľadávanie (viac slov)');
+    return { type: 'specific_search' };
+  }
+  
+  // Krátka správa bez produktových kľúčových slov = konverzácia
+  console.log('💬 Rozpoznaný zámer: všeobecná konverzácia (bez produktových slov)');
+  return { type: 'conversation' };
 }
 
 // Vytvorenie kontextu pre AI
@@ -170,16 +219,29 @@ async function buildContext(message, intent) {
     searchInfo: null
   };
   
+  console.log('🏗️ Budujem kontext pre zámer:', intent.type);
+  
   try {
     switch (intent.type) {
       case 'greeting':
         context.stats = await getStats();
         console.log('📊 Stats loaded:', context.stats?.productCount, 'products');
         break;
+      
+      case 'thanks':
+      case 'conversation':
+      case 'general_question':
+        // Pre tieto zámery NEHĽADÁME produkty - je to len konverzácia
+        console.log('💬 Konverzačný zámer - nehľadám produkty');
+        context.stats = await getStats(); // Len základné info o obchode
+        break;
         
       case 'discounts':
         context.products = await getDiscountedProducts(5);
         console.log('💰 Discounted products:', context.products.length);
+        if (context.products.length > 0) {
+          console.log('💰 Zľavnené produkty:', context.products.map(p => `${p.title} (-${p.discountPercent}%)`));
+        }
         break;
         
       case 'categories':
@@ -195,9 +257,8 @@ async function buildContext(message, intent) {
       case 'general_category':
       case 'specific_search':
       case 'gift':
-      case 'general':
-      default:
-        // Vždy vyhľadaj produkty pre tieto zámery
+        // Tieto zámery vyžadujú vyhľadávanie produktov
+        console.log('🔍 Spúšťam vyhľadávanie pre:', message);
         const result = await searchProducts(message, { limit: 5 });
         context.products = result.products;
         context.searchInfo = {
@@ -205,27 +266,45 @@ async function buildContext(message, intent) {
           matchedTerms: result.matchedTerms,
           query: result.query
         };
-        console.log('🔍 Search results:', result.products.length, 'of', result.total, '| Terms:', result.matchedTerms);
+        console.log('🔍 Výsledky vyhľadávania:', {
+          počet: result.products.length,
+          celkom: result.total,
+          matchnutéTermy: result.matchedTerms,
+          produkty: result.products.map(p => p.title)
+        });
         
         // Ak nenašiel nič, skús zjednodušený dotaz
         if (context.products.length === 0) {
-          console.log('⚠️ No results, trying simplified search...');
+          console.log('⚠️ Žiadne výsledky, skúšam zjednodušené vyhľadávanie...');
           const words = message.split(/\s+/).filter(w => w.length >= 3);
+          console.log('🔤 Skúšam jednotlivé slová:', words);
           for (const word of words) {
             const fallback = await searchProducts(word, { limit: 5 });
+            console.log(`   Slovo "${word}":`, fallback.products.length, 'výsledkov');
             if (fallback.products.length > 0) {
               context.products = fallback.products;
               context.searchInfo = { total: fallback.total, matchedTerms: fallback.matchedTerms, query: word };
-              console.log('✅ Fallback found:', fallback.products.length, 'for word:', word);
+              console.log('✅ Fallback úspešný:', fallback.products.map(p => p.title));
               break;
             }
           }
         }
         break;
+        
+      default:
+        console.log('⚠️ Neznámy zámer, preskakujem vyhľadávanie');
+        break;
     }
   } catch (error) {
-    console.error('❌ Context build error:', error.message);
+    console.error('❌ Context build error:', error.message, error.stack);
   }
+  
+  console.log('📋 Finálny kontext:', {
+    produkty: context.products.length,
+    kategórie: context.categories.length,
+    značky: context.brands.length,
+    stats: !!context.stats
+  });
   
   return context;
 }
@@ -267,11 +346,19 @@ ${context.categories.slice(0, 10).map(c => `- ${c.name} (${c.count} produktov)`)
 ${context.brands.slice(0, 15).map(b => `- ${b.name} (${b.count} produktov)`).join('\n')}`;
   }
   
-  // Ak nemáme produkty ani iný kontext, upozorni AI
-  if (!contextMessage && intent.type !== 'greeting') {
+  // Pre konverzačné zámery nepotrebujeme upozornenie o chýbajúcich produktoch
+  const conversationalIntents = ['greeting', 'thanks', 'conversation', 'general_question'];
+  
+  // Ak nemáme produkty ani iný kontext, upozorni AI (ale len ak hľadal produkty)
+  if (!contextMessage && !conversationalIntents.includes(intent.type)) {
     contextMessage = `UPOZORNENIE: Pre dotaz "${message}" som nenašiel žiadne produkty v databáze.
 Povedz zákazníkovi, že si neistý a opýtaj sa na upresnenie požiadavky.
 NIKDY nevymýšľaj produkty - povedz že v danej kategórii môžeš vyhľadať, ak upresnia čo hľadajú.`;
+  }
+  
+  // Pre konverzačné zámery daj AI vedieť, že nemá hľadať produkty
+  if (conversationalIntents.includes(intent.type) && intent.type !== 'greeting') {
+    contextMessage = `Toto je konverzačná správa, nie dotaz na produkty. Odpovedz priateľsky a stručne. Ak zákazník potrebuje pomoc s produktmi, opýtaj sa čo hľadá.`;
   }
   
   if (contextMessage) {
