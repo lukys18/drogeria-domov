@@ -303,10 +303,9 @@ async function buildContext(message, intent) {
         console.log('🏷️ Brands:', context.brands.length);
         break;
         
-      case 'general_category':
       case 'specific_search':
       case 'gift':
-        // Vyhľadávanie produktov
+        // Vyhľadávanie produktov - len pre konkrétne dotazy
         console.log('🔍 Vyhľadávam produkty pre:', message);
         
         const result = await searchProducts(message, { limit: 5 });
