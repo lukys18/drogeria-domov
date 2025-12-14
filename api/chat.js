@@ -8,38 +8,28 @@ const DEEPSEEK_API_KEY = process.env.API_KEY;
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
 
 // Systémový prompt pre konverzačného asistenta
-const SYSTEM_PROMPT = `Si priateľský a profesionálny asistent online drogérie Drogéria Domov (drogeriadomov.sk).
+const SYSTEM_PROMPT = `Si priateľský asistent online drogérie Drogéria Domov (drogeriadomov.sk).
 
-TVOJE HLAVNÉ CIELE:
-1. PORADENSTVO - Pomáhaj zákazníkom nájsť presne to, čo potrebujú
-2. DIALÓG - Pýtaj sa doplňujúce otázky pre lepšie pochopenie potrieb
-3. ODPORÚČANIA - Odporúčaj konkrétne produkty (max 3-5), nie celé zoznamy
+KRITICKÉ PRAVIDLO:
+Môžeš odporúčať IBA produkty, ktoré sú uvedené v sekcii "NÁJDENÉ PRODUKTY" v kontexte.
+Ak tam nie sú žiadne produkty, NIKDY si ich nevymýšľaj - namiesto toho sa opýtaj zákazníka na spresnenie.
 
-PRAVIDLÁ KOMUNIKÁCIE:
-- Keď zákazník povie len všeobecnú kategóriu (napr. "šampón"), OPÝTAJ SA:
-  * Na aký typ vlasov? (suché, mastné, normálne, farbené)
-  * Máte obľúbenú značku?
-  * Preferujete niečo konkrétne? (proti lupinám, pre objem, atď.)
-  
-- Keď zákazník hľadá darček, OPÝTAJ SA:
-  * Pre koho je darček? (muž/žena/dieťa)
-  * Aký máte rozpočet?
-  * Preferujete kozmetiku, parfumy, alebo praktické veci?
+TVOJE ÚLOHY:
+1. Pomáhaj zákazníkom nájsť produkty z ponuky
+2. Pýtaj sa doplňujúce otázky ak je požiadavka príliš všeobecná
+3. Odporúčaj max 3-5 produktov z kontextu
 
-- Pri konkrétnych požiadavkách PONÚKNI 3-5 najlepších možností
+FORMÁT PRODUKTOV (použi LEN ak máš produkty v kontexte):
+**[Názov z kontextu]** - [Cena z kontextu] €
+[Popis]
+Odkaz: [URL z kontextu - PRESNE ako je uvedený]
 
-FORMÁT PRODUKTOV:
-Keď odporúčaš produkt, použi PRESNE tento formát:
-**[Názov produktu]** - [Cena] €
-[Krátky popis prečo je vhodný]
-Odkaz: [URL z kontextu - skopíruj PRESNE ako je uvedený]
+AK NEMÁŠ PRODUKTY V KONTEXTE:
+- Povedz zákazníkovi, že pre lepšie výsledky potrebuješ viac informácií
+- Opýtaj sa na značku, typ produktu, alebo účel použitia
+- NEVYMÝŠĽAJ žiadne produkty ani značky
 
-DÔLEŽITÉ:
-- Odpovedaj VŽDY po slovensky
-- Buď stručný ale priateľský
-- Pri odkazoch na produkty VŽDY použi PRESNÝ odkaz z kontextu (začína https://www.drogeriadomov.sk/)
-- Nikdy nevymýšľaj produkty ani odkazy - používaj len tie z kontextu
-- Ak nie sú v kontexte relevantné produkty, povedz to a navrhni alternatívy`;
+Odpovedaj VŽDY po slovensky, priateľsky a stručne.`;
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -69,6 +59,12 @@ export default async function handler(req, res) {
     // Získaj kontext na základe zámeru
     const context = await buildContext(message, intent);
     
+    // Log pre debug
+    console.log('📦 Context products:', context.products?.length || 0);
+    if (context.products?.length > 0) {
+      console.log('📦 First product:', context.products[0].title, '|', context.products[0].url);
+    }
+    
     // Vytvor správy pre AI
     const messages = buildMessages(message, history, context, intent);
     
@@ -82,7 +78,7 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         model: 'deepseek-chat',
         messages: messages,
-        temperature: 0.7,
+        temperature: 0.5,
         max_tokens: 1000
       })
     });
@@ -99,7 +95,11 @@ export default async function handler(req, res) {
     return res.status(200).json({
       reply: reply,
       intent: intent.type,
-      productsFound: context.products?.length || 0
+      productsFound: context.products?.length || 0,
+      _debug: {
+        searchInfo: context.searchInfo,
+        hasProducts: context.products?.length > 0
+      }
     });
 
   } catch (error) {
@@ -166,41 +166,65 @@ async function buildContext(message, intent) {
     products: [],
     categories: [],
     brands: [],
-    stats: null
+    stats: null,
+    searchInfo: null
   };
   
   try {
     switch (intent.type) {
       case 'greeting':
         context.stats = await getStats();
+        console.log('📊 Stats loaded:', context.stats?.productCount, 'products');
         break;
         
       case 'discounts':
         context.products = await getDiscountedProducts(5);
+        console.log('💰 Discounted products:', context.products.length);
         break;
         
       case 'categories':
         context.categories = await getCategories();
+        console.log('📂 Categories:', context.categories.length);
         break;
         
       case 'brands':
         context.brands = await getBrands();
+        console.log('🏷️ Brands:', context.brands.length);
         break;
         
       case 'general_category':
       case 'specific_search':
+      case 'gift':
       case 'general':
       default:
+        // Vždy vyhľadaj produkty pre tieto zámery
         const result = await searchProducts(message, { limit: 5 });
         context.products = result.products;
         context.searchInfo = {
           total: result.total,
-          matchedTerms: result.matchedTerms
+          matchedTerms: result.matchedTerms,
+          query: result.query
         };
+        console.log('🔍 Search results:', result.products.length, 'of', result.total, '| Terms:', result.matchedTerms);
+        
+        // Ak nenašiel nič, skús zjednodušený dotaz
+        if (context.products.length === 0) {
+          console.log('⚠️ No results, trying simplified search...');
+          const words = message.split(/\s+/).filter(w => w.length >= 3);
+          for (const word of words) {
+            const fallback = await searchProducts(word, { limit: 5 });
+            if (fallback.products.length > 0) {
+              context.products = fallback.products;
+              context.searchInfo = { total: fallback.total, matchedTerms: fallback.matchedTerms, query: word };
+              console.log('✅ Fallback found:', fallback.products.length, 'for word:', word);
+              break;
+            }
+          }
+        }
         break;
     }
   } catch (error) {
-    console.error('Context build error:', error);
+    console.error('❌ Context build error:', error.message);
   }
   
   return context;
@@ -243,10 +267,18 @@ ${context.categories.slice(0, 10).map(c => `- ${c.name} (${c.count} produktov)`)
 ${context.brands.slice(0, 15).map(b => `- ${b.name} (${b.count} produktov)`).join('\n')}`;
   }
   
+  // Ak nemáme produkty ani iný kontext, upozorni AI
+  if (!contextMessage && intent.type !== 'greeting') {
+    contextMessage = `UPOZORNENIE: Pre dotaz "${message}" som nenašiel žiadne produkty v databáze.
+Povedz zákazníkovi, že si neistý a opýtaj sa na upresnenie požiadavky.
+NIKDY nevymýšľaj produkty - povedz že v danej kategórii môžeš vyhľadať, ak upresnia čo hľadajú.`;
+  }
+  
   if (contextMessage) {
+    console.log('📝 Context message length:', contextMessage.length);
     messages.push({
       role: 'system',
-      content: `KONTEXT PRE TÚTO ODPOVEĎ:\n${contextMessage}\n\n${intent.needsMore ? 'POZNÁMKA: Zákazník má všeobecnú požiadavku. Opýtaj sa na spresnenie pred odporúčaním produktov.' : ''}`
+      content: `DÔLEŽITÉ - KONTEXT PRE TÚTO ODPOVEĎ:\n${contextMessage}\n\n${intent.needsMore ? 'POZNÁMKA: Zákazník má všeobecnú požiadavku. Opýtaj sa na spresnenie pred odporúčaním produktov.' : 'Odporúč LEN produkty z tohto kontextu!'}`
     });
   }
   
