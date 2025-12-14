@@ -18,6 +18,66 @@ function normalizeForSearch(text) {
     .trim();
 }
 
+// Vylepšenie dotazu z histórie konverzácie
+function enhanceQueryFromHistory(message, history, intent) {
+  const lower = message.toLowerCase();
+  
+  // Ak je to follow-up otázka (obsahuje referenčné slová)
+  const followUpPatterns = [
+    /^(a |a |máte |mate |iné|ine|ďalšie|dalsie|podobné|podobne|ešte|este|aj |tiež|tiez|čo ešte|co este)/i,
+    /^(inú|inu|inú značku|inu znacku|inej značky|inej znacky)/i,
+    /^(lacnejšie|lacnejsie|drahšie|drahsie|väčšie|vacsie|menšie|mensie)/i
+  ];
+  
+  const isFollowUp = followUpPatterns.some(pattern => pattern.test(lower)) || 
+                     (history.length > 0 && message.split(/\s+/).length <= 5);
+  
+  if (!isFollowUp || history.length === 0) {
+    return message;
+  }
+  
+  console.log('🔄 Detekovaný follow-up dotaz, hľadám kontext v histórii...');
+  
+  // Extrahuj kľúčové slová z posledných správ
+  const productKeywords = [
+    'šampón', 'sampon', 'mydlo', 'krém', 'krem', 'parfém', 'parfem', 'dezodorant',
+    'prací', 'praci', 'čistič', 'cistic', 'gel', 'pasta', 'pleť', 'plet',
+    'vlasy', 'telo', 'ruky', 'tvár', 'tvar', 'prášok', 'prasok', 'aviváž', 'avivaz',
+    'wc', 'toaletn', 'papier', 'riad', 'podlaha', 'okno', 'kupel', 'zuby', 'ustna',
+    'lupiny', 'lupin', 'mastné', 'mastne', 'suché', 'suche', 'poškodené', 'poskodene'
+  ];
+  
+  const brandKeywords = [
+    'jar', 'persil', 'ariel', 'nivea', 'dove', 'colgate', 'head', 'shoulders',
+    'pantene', 'garnier', 'loreal', 'palmolive', 'ajax', 'domestos', 'clear'
+  ];
+  
+  let foundKeywords = [];
+  
+  // Prejdi poslednými správami v histórii (user správy)
+  const recentUserMessages = history
+    .filter(h => h.role === 'user')
+    .slice(-3)
+    .map(h => h.content.toLowerCase());
+  
+  for (const historyMsg of recentUserMessages) {
+    for (const kw of [...productKeywords, ...brandKeywords]) {
+      if (historyMsg.includes(kw) && !foundKeywords.includes(kw)) {
+        foundKeywords.push(kw);
+      }
+    }
+  }
+  
+  if (foundKeywords.length > 0) {
+    // Kombinuj pôvodný dotaz s kontextom z histórie
+    const enhanced = `${message} ${foundKeywords.join(' ')}`;
+    console.log(`📝 Pridané kľúčové slová z histórie: ${foundKeywords.join(', ')}`);
+    return enhanced;
+  }
+  
+  return message;
+}
+
 // Systémový prompt pre konverzačného asistenta
 const SYSTEM_PROMPT = `Si priateľský asistent online drogérie Drogéria Domov (drogeriadomov.sk).
 
@@ -78,8 +138,12 @@ export default async function handler(req, res) {
     const intent = analyzeIntent(message);
     console.log(`💬 Správa: "${message}" | Zámer: ${intent.type}`);
     
+    // Vytvor rozšírený dotaz z histórie pre follow-up otázky
+    const enhancedMessage = enhanceQueryFromHistory(message, history, intent);
+    console.log(`🔄 Enhanced query: "${enhancedMessage}"`);
+    
     // Získaj kontext na základe zámeru
-    const context = await buildContext(message, intent);
+    const context = await buildContext(enhancedMessage, intent);
     
     // Log pre debug
     console.log('📦 Context products:', context.products?.length || 0);
