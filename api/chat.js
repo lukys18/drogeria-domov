@@ -2,7 +2,7 @@
 // Konverzačný AI asistent pre Drogériu Domov
 // Optimalizovaný pre poradenstvo a cielené odporúčania
 
-import { searchProducts, getCategories, getBrands, getStats, getDiscountedProducts, searchByCategory, searchByBrand } from '../redisClient.js';
+import { searchProducts, getCategories, getBrands, getStats, getDiscountedProducts } from '../redisClient.js';
 
 const DEEPSEEK_API_KEY = process.env.API_KEY;
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
@@ -268,81 +268,34 @@ async function buildContext(message, intent) {
       case 'general_category':
       case 'specific_search':
       case 'gift':
-        // Tieto zámery vyžadujú vyhľadávanie produktov
-        console.log('🔍 Spúšťam pokročilé vyhľadávanie pre:', message);
+        // Vyhľadávanie produktov
+        console.log('🔍 Vyhľadávam produkty pre:', message);
         
-        // Extrahuj značku ak je v dotaze
-        const brandMatch = message.match(/\b(jar|persil|ariel|nivea|dove|colgate|oral-b|head|pantene|garnier|loreal|palmolive|ajax|domestos|cif|bref|savo|vanish|lenor|fairy)\b/i);
+        const result = await searchProducts(message, { limit: 5 });
+        context.products = result.products;
+        context.searchInfo = {
+          total: result.total,
+          terms: result.terms,
+          query: result.query
+        };
         
-        if (brandMatch) {
-          console.log('🏷️ Detekovaná značka:', brandMatch[1]);
-          const brandProducts = await searchByBrand(brandMatch[1], 5);
-          if (brandProducts.length > 0) {
-            // Ak je aj ďalší term, filtruj
-            const otherTerms = message.toLowerCase().replace(brandMatch[0].toLowerCase(), '').trim();
-            if (otherTerms.length > 2) {
-              const filtered = brandProducts.filter(p => 
-                normalizeForSearch(`${p.title} ${p.description}`).includes(normalizeForSearch(otherTerms))
-              );
-              if (filtered.length > 0) {
-                context.products = filtered;
-              } else {
-                context.products = brandProducts;
-              }
-            } else {
-              context.products = brandProducts;
-            }
-            context.searchInfo = { total: context.products.length, matchedTerms: [brandMatch[1]], query: message };
-          }
-        }
-        
-        // Ak nemáme produkty zo značky, skús normálne vyhľadávanie
-        if (context.products.length === 0) {
-          const result = await searchProducts(message, { limit: 5 });
-          context.products = result.products;
-          context.searchInfo = {
-            total: result.total,
-            matchedTerms: result.matchedTerms,
-            query: result.query
-          };
-        }
-        
-        console.log('🔍 Výsledky vyhľadávania:', {
+        console.log('🔍 Výsledky:', {
           počet: context.products.length,
           celkom: context.searchInfo?.total || 0,
-          matchnutéTermy: context.searchInfo?.matchedTerms || [],
           produkty: context.products.map(p => p.title)
         });
         
-        // Ak nenašiel nič, skús vyhľadať po jednotlivých slovách
+        // Ak nenašiel nič, skús jednotlivé slová
         if (context.products.length === 0) {
           console.log('⚠️ Žiadne výsledky, skúšam jednotlivé slová...');
           const words = message.split(/\s+/).filter(w => w.length >= 3);
           for (const word of words) {
-            console.log(`   Skúšam slovo: "${word}"`);
             const fallback = await searchProducts(word, { limit: 5 });
             if (fallback.products.length > 0) {
               context.products = fallback.products;
-              context.searchInfo = { total: fallback.total, matchedTerms: fallback.matchedTerms, query: word };
-              console.log(`   ✅ Našiel ${fallback.products.length} produktov pre "${word}"`);
+              context.searchInfo = { total: fallback.total, terms: fallback.terms, query: word };
+              console.log(`✅ Našiel ${fallback.products.length} produktov pre "${word}"`);
               break;
-            }
-          }
-        }
-        
-        // Ak stále nič, skús kategóriu
-        if (context.products.length === 0) {
-          console.log('⚠️ Stále nič, skúšam kategórie...');
-          const categoryKeywords = ['šampón', 'mydlo', 'krém', 'prací', 'čistiaci', 'wc', 'riad', 'vlasy', 'telo', 'parfém'];
-          for (const kw of categoryKeywords) {
-            if (message.toLowerCase().includes(kw) || message.toLowerCase().includes(normalizeForSearch(kw))) {
-              const catProducts = await searchByCategory(kw, 5);
-              if (catProducts.length > 0) {
-                context.products = catProducts;
-                context.searchInfo = { total: catProducts.length, matchedTerms: [kw], query: kw };
-                console.log(`   ✅ Našiel ${catProducts.length} produktov v kategórii "${kw}"`);
-                break;
-              }
             }
           }
         }

@@ -1,8 +1,7 @@
 // api/testSearch.js
-// Testovací endpoint pre overenie vyhľadávania produktov
-// Použitie: GET /api/testSearch?q=jar+na+riad
+// Testovací endpoint pre overenie vyhľadávania
 
-import { searchProducts, getStats, searchByCategory, searchByBrand, getCategories, getBrands } from '../redisClient.js';
+import { searchProducts, getStats, getCategories, getBrands, getDiscountedProducts } from '../redisClient.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -19,51 +18,27 @@ export default async function handler(req, res) {
     
     switch (type) {
       case 'stats':
-        // Získaj štatistiky databázy
         result = await getStats();
-        result.categories = await getCategories();
-        result.brands = await getBrands();
         break;
         
-      case 'category':
-        // Vyhľadaj v kategórii
-        if (!q) {
-          return res.status(400).json({ error: 'Parameter q je povinný pre category search' });
-        }
-        const catProducts = await searchByCategory(q, parseInt(limit));
+      case 'categories':
+        result = { categories: await getCategories() };
+        break;
+        
+      case 'brands':
+        result = { brands: await getBrands() };
+        break;
+        
+      case 'discounts':
+        const discounted = await getDiscountedProducts(parseInt(limit));
         result = {
-          query: q,
-          type: 'category',
-          count: catProducts.length,
-          products: catProducts.map(p => ({
-            id: p.id,
+          count: discounted.length,
+          products: discounted.map(p => ({
             title: p.title,
             brand: p.brand,
             price: p.price,
             salePrice: p.salePrice,
-            category: p.categoryMain,
-            url: p.url
-          }))
-        };
-        break;
-        
-      case 'brand':
-        // Vyhľadaj podľa značky
-        if (!q) {
-          return res.status(400).json({ error: 'Parameter q je povinný pre brand search' });
-        }
-        const brandProducts = await searchByBrand(q, parseInt(limit));
-        result = {
-          query: q,
-          type: 'brand',
-          count: brandProducts.length,
-          products: brandProducts.map(p => ({
-            id: p.id,
-            title: p.title,
-            brand: p.brand,
-            price: p.price,
-            salePrice: p.salePrice,
-            category: p.categoryMain,
+            discount: `${p.discountPercent}%`,
             url: p.url
           }))
         };
@@ -71,39 +46,33 @@ export default async function handler(req, res) {
         
       case 'search':
       default:
-        // Plné vyhľadávanie
         if (!q) {
-          return res.status(400).json({ 
-            error: 'Parameter q je povinný',
+          return res.status(200).json({
             usage: {
               search: '/api/testSearch?q=jar na riad',
               stats: '/api/testSearch?type=stats',
-              category: '/api/testSearch?type=category&q=domacnost',
-              brand: '/api/testSearch?type=brand&q=jar'
+              categories: '/api/testSearch?type=categories',
+              brands: '/api/testSearch?type=brands',
+              discounts: '/api/testSearch?type=discounts'
             }
           });
         }
         
-        console.log('🧪 Test vyhľadávanie:', q);
         const searchResult = await searchProducts(q, { limit: parseInt(limit) });
         
         result = {
           query: q,
-          type: 'search',
+          terms: searchResult.terms,
           total: searchResult.total,
-          matchedTerms: searchResult.matchedTerms,
           count: searchResult.products.length,
           products: searchResult.products.map(p => ({
-            id: p.id,
             title: p.title,
             brand: p.brand,
             price: p.price,
             salePrice: p.salePrice,
             discount: p.hasDiscount ? `${p.discountPercent}%` : null,
             category: p.categoryMain,
-            categoryFull: p.category,
-            description: p.description?.substring(0, 150) + '...',
-            score: p._score?.toFixed(3),
+            score: p._score,
             url: p.url
           }))
         };
@@ -117,11 +86,10 @@ export default async function handler(req, res) {
     });
     
   } catch (error) {
-    console.error('❌ Test search error:', error);
+    console.error('❌ Test error:', error);
     return res.status(500).json({
       success: false,
-      error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      error: error.message
     });
   }
 }
