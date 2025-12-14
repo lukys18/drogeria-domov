@@ -78,25 +78,66 @@ export async function searchProducts(query, options = {}) {
     return { products: [], total: 0, query };
   }
   
-  // Detekcia či používateľ hľadá make-up produkty (nie odstránenie)
   const queryLower = query.toLowerCase();
+  const queryNorm = normalize(query);
+  
+  // === DETEKCIA INTENT A PREFEROVANEJ KATEGÓRIE ===
+  let preferredCategory = null;
+  let requiredInTitle = null;  // Slová ktoré MUSIA byť v názve produktu
+  let excludePatterns = [];    // Vzory na vylúčenie
+  
+  // MAKEUP detekcia
   const wantsMakeup = /make\s*-?\s*up|makeup|mejkap|mejk[\s-]?ap|liceni|líčen/i.test(queryLower) && 
                       !/odstrán|odstran|čist|cist|micel|demak|zmyv/i.test(queryLower);
-  
-  // Detekcia preferovanej kategórie podľa dotazu
-  let preferredCategory = null;
   if (wantsMakeup) {
-    preferredCategory = /dekorat|liceni|licenie|makeup|make-up|líčen/i;
-    console.log('💄 Preferovaná kategória: Dekoratívna kozmetika / Líčenie');
+    preferredCategory = /dekorat|liceni|licenie|makeup|make-up|líčen|pery|oci|tiene/i;
+    excludePatterns.push(/odstran|odlicov|demak|micel|cist|umyv|hubka|olej|sprej|krem na|depilac/i);
+    console.log('💄 Intent: MAKEUP');
   }
   
-  // Expanduj synonymá a spojené slová
+  // PEELING detekcia
+  const wantsPeeling = /peeling|pieling|exfoli|scrub/i.test(queryLower);
+  if (wantsPeeling) {
+    requiredInTitle = /peeling|pieling|exfoli|scrub/i;
+    console.log('🧴 Intent: PEELING - vyžadujem slovo v názve');
+  }
+  
+  // ŠAMPÓN detekcia
+  const wantsShampoo = /šamp[oó]n|sampon|shampoo/i.test(queryLower);
+  const wantsKidsShampoo = wantsShampoo && /det|bab[aä]|dieta|kids|child/i.test(queryLower);
+  if (wantsKidsShampoo) {
+    requiredInTitle = /šamp[oó]n|sampon|shampoo/i;
+    preferredCategory = /det|bab|kids|child/i;
+    excludePatterns.push(/men|man|muž|muz|gentleman|beard|brady|fuz/i);
+    console.log('👶 Intent: DETSKÝ ŠAMPÓN');
+  } else if (wantsShampoo) {
+    requiredInTitle = /šamp[oó]n|sampon|shampoo/i;
+    console.log('🧴 Intent: ŠAMPÓN');
+  }
+  
+  // PARFÉM detekcia
+  const wantsPerfume = /parf[eé]m|parfum|voňavk|vonavk|edt|edp|cologne/i.test(queryLower);
+  if (wantsPerfume) {
+    requiredInTitle = /parf|voňav|vonavk|edt|edp|cologne|toaletn.*voda/i;
+    console.log('🌸 Intent: PARFÉM');
+  }
+  
+  // ZUBNÁ PASTA detekcia
+  const wantsToothpaste = /zubn[áa]\s*past|pasta\s*na\s*zuby|toothpaste/i.test(queryLower);
+  if (wantsToothpaste) {
+    requiredInTitle = /zubn|pasta|tooth/i;
+    console.log('🦷 Intent: ZUBNÁ PASTA');
+  }
+
+  // === QUERY EXPANSION ===
   let expandedQuery = query
     .replace(/make\s*-?\s*up|makeup|mejkap|mejk[\s-]?ap/gi, 'makeup licenie dekorativna kozmetika ruz riasenka ocne tiene pery rteny podklad korektor mejkap ceruzka konturo puder')
     .replace(/ruz\b/gi, 'ruz pery rteny rtenka')
     .replace(/oci|tiena/gi, 'oci tiena ocne tiene paleta')
     .replace(/riasenka/gi, 'riasenka mascara oci ocna')
-    .replace(/podklad|make-?up na tvar/gi, 'podklad foundation korektor concealer puder');
+    .replace(/podklad|make-?up na tvar/gi, 'podklad foundation korektor concealer puder')
+    .replace(/peeling/gi, 'peeling exfoliacny scrub')
+    .replace(/sampon|šampón/gi, 'sampon samponovy vlasy');
   
   // Normalizuj query
   const normalizedQuery = normalize(expandedQuery);
@@ -116,10 +157,11 @@ export async function searchProducts(query, options = {}) {
   // Detekcia cieľovej skupiny v dotaze
   const forWomen = /(\bpre zeny\b|\bzeny\b|\bzena\b|\bzensky\b|\bdamsk)/i.test(normalizedQuery);
   const forMen = /(\bpre muzov\b|\bmuzov\b|\bmuz\b|\bmuzsky\b|\bpansk)/i.test(normalizedQuery);
-  const forKids = /(\bpre deti\b|\bdeti\b|\bdetsk|\bdieta\b|\bbaby\b)/i.test(normalizedQuery);
+  const forKids = /(\bpre deti\b|\bdeti\b|\bdetsk|\bdieta\b|\bbaby\b|\bbabat)/i.test(normalizedQuery);
   
   console.log('👥 Cieľová skupina:', { forWomen, forMen, forKids });
-  console.log('💄 Hľadá make-up produkty:', wantsMakeup);
+  if (requiredInTitle) console.log('📌 Vyžadujem v názve:', requiredInTitle);
+  if (excludePatterns.length) console.log('🚫 Vylučujem vzory:', excludePatterns.length);
   
   // Bodovanie produktov
   const scored = [];
@@ -131,25 +173,33 @@ export async function searchProducts(query, options = {}) {
     let score = 0;
     const searchText = product.searchText || normalize(`${product.title} ${product.brand} ${product.description} ${product.category}`);
     const titleNorm = normalize(product.title);
+    const titleLower = product.title.toLowerCase();
     const brandNorm = normalize(product.brand || '');
     const categoryNorm = normalize(product.category || product.categoryMain || '');
     
-    // Ak hľadá make-up, preskočiť produkty na ODSTRÁNENIE make-upu
-    if (wantsMakeup) {
-      const isRemovalProduct = /odstran|odlicov|demak|micel|cist|umyv|hubka/.test(titleNorm) ||
-                               /odstranuje|odlicuje|cistenie|umyvanie/.test(searchText);
-      if (isRemovalProduct) {
-        console.log(`❌ Preskakujem produkt na odstránenie make-upu: ${product.title}`);
+    // === HARD FILTRE - preskočiť produkty ktoré nespĺňajú požiadavky ===
+    
+    // Ak vyžadujeme určité slovo v názve, skontroluj
+    if (requiredInTitle && !requiredInTitle.test(titleLower) && !requiredInTitle.test(titleNorm)) {
+      continue; // Preskočiť produkty bez požadovaného slova
+    }
+    
+    // Ak máme exclude patterns, skontroluj
+    if (excludePatterns.length > 0) {
+      const shouldExclude = excludePatterns.some(pattern => pattern.test(titleLower) || pattern.test(titleNorm));
+      if (shouldExclude) {
+        console.log(`❌ Vylúčený produkt: ${product.title}`);
         continue;
       }
     }
     
+    // === SOFT FILTRE - bonus/penalizácia ===
+    
     // Bonus/penalizácia za kategóriu ak máme preferovanú kategóriu
     if (preferredCategory) {
-      const categoryMatches = preferredCategory.test(categoryNorm);
+      const categoryMatches = preferredCategory.test(categoryNorm) || preferredCategory.test(titleNorm);
       if (categoryMatches) {
         score += 50; // Veľký bonus za správnu kategóriu
-        console.log(`✅ Kategória match: ${product.title} | ${product.category}`);
       } else if (wantsMakeup) {
         // Ak hľadá makeup a produkt nie je v makeup kategórii, penalizuj
         score -= 20;

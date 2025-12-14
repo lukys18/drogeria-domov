@@ -195,27 +195,40 @@ export default async function handler(req, res) {
     const data = await response.json();
     const reply = data.choices[0]?.message?.content || 'Prepáčte, nastala chyba.';
 
-    // Priprav produkty pre frontend (klikateľné kartičky)
-    const productsForDisplay = context.products?.slice(0, 5).map(p => ({
-      id: p.id,
-      title: p.title,
-      price: p.price,
-      salePrice: p.salePrice,
-      hasDiscount: p.hasDiscount,
-      discountPercent: p.discountPercent,
-      image: p.image,
-      url: p.url,
-      brand: p.brand
-    })) || [];
+    // Detekuj či AI hovorí že produkty nie sú relevantné alebo ich nemá
+    const replyLower = reply.toLowerCase();
+    const aiSaysNoProducts = /nemám v ponuke|nenašl|nenasiel|nemáme|nema\s*v\s*ponuke|momentálne nemám|žiadne produkty|ziadne produkty|nie sú relevantné|nie su relevantne|neodporúčam tieto|neodporucam tieto/.test(replyLower);
+    
+    // Priprav produkty pre frontend (klikateľné kartičky) - LEN ak sú relevantné
+    let productsForDisplay = [];
+    
+    if (context.products?.length > 0 && !aiSaysNoProducts) {
+      productsForDisplay = context.products.slice(0, 5).map(p => ({
+        id: p.id,
+        title: p.title,
+        price: p.price,
+        salePrice: p.salePrice,
+        hasDiscount: p.hasDiscount,
+        discountPercent: p.discountPercent,
+        image: p.image,
+        url: p.url,
+        brand: p.brand
+      }));
+    }
+    
+    if (aiSaysNoProducts) {
+      console.log('🚫 AI hovorí že produkty nie sú relevantné - nezobrazujem kartičky');
+    }
 
     return res.status(200).json({
       reply: reply,
-      products: productsForDisplay, // Produkty pre vizuálne zobrazenie
+      products: productsForDisplay, // Produkty LEN ak sú relevantné
       intent: intent.type,
       productsFound: context.products?.length || 0,
       _debug: {
         searchInfo: context.searchInfo,
-        hasProducts: context.products?.length > 0
+        hasProducts: context.products?.length > 0,
+        aiSaysNoProducts: aiSaysNoProducts
       }
     });
 
