@@ -80,16 +80,23 @@ export async function searchProducts(query, options = {}) {
   
   // Detekcia či používateľ hľadá make-up produkty (nie odstránenie)
   const queryLower = query.toLowerCase();
-  const wantsMakeup = /make\s*-?\s*up|makeup|mejkap|mejk[\s-]?ap/i.test(queryLower) && 
+  const wantsMakeup = /make\s*-?\s*up|makeup|mejkap|mejk[\s-]?ap|liceni|líčen/i.test(queryLower) && 
                       !/odstrán|odstran|čist|cist|micel|demak|zmyv/i.test(queryLower);
+  
+  // Detekcia preferovanej kategórie podľa dotazu
+  let preferredCategory = null;
+  if (wantsMakeup) {
+    preferredCategory = /dekorat|liceni|licenie|makeup|make-up|líčen/i;
+    console.log('💄 Preferovaná kategória: Dekoratívna kozmetika / Líčenie');
+  }
   
   // Expanduj synonymá a spojené slová
   let expandedQuery = query
-    .replace(/make\s*-?\s*up|makeup|mejkap|mejk[\s-]?ap/gi, 'makeup licenie dekorativna kozmetika ruz riasenka ocne tiene pery rteny plet tvar tvare podklad korektor mejkap ceruzka konturo')
+    .replace(/make\s*-?\s*up|makeup|mejkap|mejk[\s-]?ap/gi, 'makeup licenie dekorativna kozmetika ruz riasenka ocne tiene pery rteny podklad korektor mejkap ceruzka konturo puder')
     .replace(/ruz\b/gi, 'ruz pery rteny rtenka')
     .replace(/oci|tiena/gi, 'oci tiena ocne tiene paleta')
     .replace(/riasenka/gi, 'riasenka mascara oci ocna')
-    .replace(/podklad|make-?up na tvar/gi, 'podklad foundation tvar tvare korektor concealer puder');
+    .replace(/podklad|make-?up na tvar/gi, 'podklad foundation korektor concealer puder');
   
   // Normalizuj query
   const normalizedQuery = normalize(expandedQuery);
@@ -125,6 +132,7 @@ export async function searchProducts(query, options = {}) {
     const searchText = product.searchText || normalize(`${product.title} ${product.brand} ${product.description} ${product.category}`);
     const titleNorm = normalize(product.title);
     const brandNorm = normalize(product.brand || '');
+    const categoryNorm = normalize(product.category || product.categoryMain || '');
     
     // Ak hľadá make-up, preskočiť produkty na ODSTRÁNENIE make-upu
     if (wantsMakeup) {
@@ -133,6 +141,18 @@ export async function searchProducts(query, options = {}) {
       if (isRemovalProduct) {
         console.log(`❌ Preskakujem produkt na odstránenie make-upu: ${product.title}`);
         continue;
+      }
+    }
+    
+    // Bonus/penalizácia za kategóriu ak máme preferovanú kategóriu
+    if (preferredCategory) {
+      const categoryMatches = preferredCategory.test(categoryNorm);
+      if (categoryMatches) {
+        score += 50; // Veľký bonus za správnu kategóriu
+        console.log(`✅ Kategória match: ${product.title} | ${product.category}`);
+      } else if (wantsMakeup) {
+        // Ak hľadá makeup a produkt nie je v makeup kategórii, penalizuj
+        score -= 20;
       }
     }
     

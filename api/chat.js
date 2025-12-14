@@ -498,14 +498,21 @@ function buildMessages(message, history, context, intent) {
   }
   
   if (context.products && context.products.length > 0) {
-    contextMessage = `NÁJDENÉ PRODUKTY (${context.products.length} z ${context.searchInfo?.total || '?'}):
+    contextMessage = `PÔVODNÁ POŽIADAVKA ZÁKAZNÍKA: "${message}"
+
+NÁJDENÉ PRODUKTY (${context.products.length} z ${context.searchInfo?.total || '?'}):
 
 ${context.products.map((p, i) => `${i + 1}. **${p.title}**
    Značka: ${p.brand || 'neuvedená'}
-   Kategória: ${p.categoryMain}
+   Kategória: ${p.category || p.categoryMain}
    Cena: ${p.salePrice ? `~~${p.price}€~~ **${p.salePrice}€** (-${p.discountPercent}%)` : `${p.price}€`}
    ${p.description ? `Popis: ${p.description.substring(0, 100)}...` : ''}
-   URL: ${p.url}`).join('\n\n')}`;
+   URL: ${p.url}`).join('\n\n')}
+
+DÔLEŽITÉ: Skontroluj či tieto produkty skutočne zodpovedajú požiadavke zákazníka!
+- Ak produkty NIE SÚ relevantné k tomu čo zákazník hľadá, NEODPORÚČAJ ICH.
+- Namiesto toho sa ospravedlň a opýtaj sa na upresnenie.
+- Napríklad: ak zákazník hľadá "makeup" ale výsledky sú oleje na tvár, povedz že makeup produkty (rúže, tiene, riasenky) momentálne nemáš v ponuke.`;
   }
   
   if (context.categories && context.categories.length > 0 && !context.products.length) {
