@@ -1,5 +1,7 @@
 // api/chat.js
-// Chat endpoint s RAG systémom pre produkty
+// Chat endpoint s RAG systémom pre XML produkty z Redis
+
+import { searchProducts, getProductsMetadata, getAllCategories } from '../redisClient.js';
 
 // RAG konfigurácia
 const STOP_WORDS = new Set([
@@ -15,21 +17,32 @@ const SYNONYMS = {
   'dostupny': ['skladom', 'dispozicii', 'sklade', 'available', 'mame', 'dostupnost', 'dostupne'],
   'zlava': ['akcia', 'discount', 'sale', 'zlacnene', 'promo', 'kupon', 'vypredaj'],
   'kupit': ['objednat', 'nakupit', 'buy', 'purchase', 'order', 'kosik'],
-  'hladat': ['najst', 'vyhladat', 'search', 'find', 'kde', 'aky', 'ktory', 'odporucit'],
-  'velkost': ['size', 'rozmer', 'cislo', 'velkosti', 'sizes'],
+  'hladat': ['najst', 'vyhladat', 'search', 'find', 'kde', 'aky', 'ktory', 'odporucit', 'poradit'],
+  'velkost': ['size', 'rozmer', 'cislo', 'velkosti', 'sizes', 'ml', 'gram', 'kg', 'liter'],
   'farba': ['color', 'colour', 'odtien', 'farby', 'farebny'],
   'doprava': ['dorucenie', 'shipping', 'delivery', 'postovne', 'zasielka', 'kurier'],
-  'vosk': ['vosok', 'wax', 'ski wax', 'lyze', 'lyziarsky', 'skiing'],
-  'lyze': ['lyzovanie', 'skiing', 'ski', 'lyziarsky', 'bezky', 'bezecke']
+  // Drogéria špecifické synonymá
+  'drogeria': ['kozmetika', 'hygena', 'cistitace', 'mydlo', 'sampon', 'krem', 'drogerie'],
+  'cistenie': ['cistit', 'upratovanie', 'upratovat', 'cistitace', 'dezinfekcia', 'umyvanie'],
+  'pranie': ['prat', 'pracie', 'prasok', 'gel', 'avivaž', 'avivaz', 'pradlo'],
+  'kozmetika': ['makeup', 'krem', 'plet', 'tvar', 'oci', 'pery', 'ruz', 'maskara'],
+  'vlasy': ['sampon', 'kondicioner', 'lak', 'gel', 'farba', 'farbenie'],
+  'telo': ['sprchovy', 'telove', 'mleko', 'olej', 'hydratacia', 'starostlivost'],
+  'zuby': ['zubna', 'pasta', 'kefka', 'ustna', 'voda', 'nit'],
+  'parfem': ['parfum', 'vona', 'deodorant', 'antiperspirant', 'toaletna'],
+  'deti': ['detsky', 'baby', 'dieta', 'kojenec', 'plienky', 'puder'],
+  'domacnost': ['wc', 'kuchyna', 'podlaha', 'okna', 'sklo', 'nabytok']
 };
 
 const INTENT_PATTERNS = {
   'count_query': ['kolko', 'pocet', 'celkom', 'vsetky', 'vsetko', 'vsetkych', 'kolko mate'],
   'price_query': ['cena', 'kolko stoji', 'za kolko', 'cennik', 'price'],
   'availability_query': ['skladom', 'dostupny', 'dostupne', 'mame', 'je k dispozicii'],
-  'variant_query': ['variant', 'varianty', 'velkost', 'velkosti', 'farba', 'farby', 'druhy', 'typy', 'ake'],
+  'category_query': ['kategoria', 'kategorie', 'druhy', 'typy', 'sortiment', 'ponuka'],
   'discount_query': ['zlava', 'akcia', 'zlacnene', 'vypredaj', 'promo'],
-  'recommendation_query': ['odporuc', 'porad', 'navrhni', 'najlepsie', 'top', 'popularny']
+  'recommendation_query': ['odporuc', 'porad', 'navrhni', 'najlepsie', 'top', 'popularny', 'co mi'],
+  'cleaning_query': ['cistenie', 'upratovanie', 'umyvanie', 'dezinfekcia'],
+  'cosmetics_query': ['kozmetika', 'makeup', 'krem', 'plet', 'vlasy', 'sampon']
 };
 
 export default async function handler(req, res) {
@@ -45,8 +58,8 @@ export default async function handler(req, res) {
     let enhancedMessages = [...messages];
     const lastUserMessage = getLastUserMessage(messages);
     
-    // RAG: Načítaj a spracuj produkty
-    const ragResult = await processWithRAG(lastUserMessage, req.headers.host);
+    // RAG: Vyhľadaj relevantné produkty z Redis
+    const ragResult = await processWithRAG(lastUserMessage);
     console.log('🧠 RAG Result:', {
       intent: ragResult.intent,
       matchedProducts: ragResult.products.length,
@@ -75,7 +88,7 @@ export default async function handler(req, res) {
       if (lastUserIndex !== -1) {
         enhancedMessages.splice(lastUserIndex, 0, {
           role: 'system',
-          content: `DÔLEŽITÉ - Použi PRESNE tieto informácie o produktoch:\n\n${combinedContext}\n\nPRAVIDLÁ:\n- Uvádzaj IBA ceny z tohto kontextu\n- Pri každom produkte uveď presnú cenu a dostupnosť\n- Ak produkt nie je v zozname, povedz že ho nemáme\n- Nedomýšľaj si ceny ani produkty\n- Pri variantoch uveď ceny jednotlivých variantov`
+          content: `DÔLEŽITÉ - Použi PRESNE tieto informácie o produktoch:\n\n${combinedContext}\n\nPRAVIDLÁ:\n- Uvádzaj IBA ceny z tohto kontextu\n- Pri každom produkte uveď presnú cenu a dostupnosť\n- Ak produkt nie je v zozname, povedz že ho nemáme alebo ho nevieme nájsť\n- Nedomýšľaj si ceny ani produkty\n- Odpovedaj v slovenčine`
         });
       }
     }
@@ -129,45 +142,37 @@ function getLastUserMessage(messages) {
   return '';
 }
 
-// RAG spracovanie
-async function processWithRAG(query, host) {
+// RAG spracovanie s Redis
+async function processWithRAG(query) {
   console.log('🧠 RAG processing query:', query);
   
   try {
-    // Načítaj produkty z cache
-    const baseUrl = `https://${host}`;
-    const response = await fetch(`${baseUrl}/api/syncProducts`, {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' }
-    });
-
-    if (!response.ok) {
-      console.warn('❌ Could not fetch products');
-      return { intent: null, products: [], context: '' };
+    // Získaj metadáta
+    const metadata = await getProductsMetadata();
+    console.log(`📊 Products in database: ${metadata.count}, Last update: ${metadata.lastUpdate}`);
+    
+    if (!metadata.count || metadata.count === 0) {
+      return { 
+        intent: null, 
+        products: [], 
+        context: '⚠️ Produktová databáza je prázdna. Prosím, spustite sync.' 
+      };
     }
-
-    const result = await response.json();
-    if (!result.success || !result.data?.products?.length) {
-      return { intent: null, products: [], context: '' };
-    }
-
-    const products = result.data.products;
-    console.log('✅ Loaded', products.length, 'products for RAG');
 
     // Detekuj intent
     const intent = detectIntent(query);
     console.log('🎯 Detected intent:', intent);
 
-    // Skoruj produkty
-    const scoredProducts = scoreProducts(query, products);
-    console.log('📊 Scored products, top 3:', scoredProducts.slice(0, 3).map(p => `${p.title}: ${p.score}`));
+    // Vyhľadaj produkty pomocou inverzného indexu
+    const products = await searchProducts(query, 15);
+    console.log('📊 Found products:', products.length);
 
     // Vytvor kontext podľa intentu
-    const context = buildContext(intent, scoredProducts, products, query);
+    const context = await buildContext(intent, products, metadata, query);
 
     return {
       intent,
-      products: scoredProducts,
+      products,
       context
     };
   } catch (error) {
@@ -188,165 +193,76 @@ function detectIntent(query) {
   return 'general_query';
 }
 
-// Skorovanie produktov
-function scoreProducts(query, products) {
-  const normalized = normalizeText(query);
-  const queryWords = extractKeywords(normalized);
-  const expandedWords = expandWithSynonyms(queryWords);
-  
-  console.log('🔍 Query keywords:', queryWords);
-  console.log('🔍 Expanded with synonyms:', expandedWords);
-
-  const scored = products.map(product => {
-    let score = 0;
-    
-    // Vytvor prehľadávací text z produktu
-    const titleNorm = normalizeText(product.title);
-    const descNorm = normalizeText(product.description || '');
-    const typeNorm = normalizeText(product.product_type || '');
-    const tagsNorm = (product.tags || []).map(t => normalizeText(t));
-    const variantsNorm = (product.variants || []).map(v => normalizeText(v.title || ''));
-
-    // Skórovanie
-    for (const word of expandedWords) {
-      if (word.length < 2) continue;
-      
-      // Presná zhoda v názve (najvyššie skóre)
-      if (titleNorm.includes(word)) {
-        score += 10;
-      }
-      
-      // Zhoda v type produktu
-      if (typeNorm.includes(word)) {
-        score += 7;
-      }
-      
-      // Zhoda v tagoch
-      if (tagsNorm.some(t => t.includes(word))) {
-        score += 5;
-      }
-      
-      // Zhoda vo variantoch
-      if (variantsNorm.some(v => v.includes(word))) {
-        score += 6;
-      }
-      
-      // Zhoda v popise
-      if (descNorm.includes(word)) {
-        score += 3;
-      }
-    }
-
-    // Bonus za dostupnosť
-    if (product.available) {
-      score += 2;
-    }
-
-    // Bonus za zľavu ak sa pýta na akcie
-    if (product.has_discount && normalized.match(/zlava|akcia|sale|promo/)) {
-      score += 5;
-    }
-
-    return { ...product, score };
-  });
-
-  // Zoraď podľa skóre
-  return scored.sort((a, b) => b.score - a.score);
-}
-
-// Extrakcia kľúčových slov
-function extractKeywords(text) {
-  return text
-    .split(/\s+/)
-    .filter(word => word.length > 1 && !STOP_WORDS.has(word));
-}
-
-// Rozšírenie synonymami
-function expandWithSynonyms(words) {
-  const expanded = new Set(words);
-  
-  for (const word of words) {
-    // Pridaj synonymá pre toto slovo
-    for (const [key, synonyms] of Object.entries(SYNONYMS)) {
-      if (key === word || synonyms.includes(word)) {
-        expanded.add(key);
-        synonyms.forEach(s => expanded.add(s));
-      }
-    }
-  }
-  
-  return Array.from(expanded);
-}
-
 // Vytvorenie kontextu pre AI
-function buildContext(intent, scoredProducts, allProducts, query) {
-  const availableCount = allProducts.filter(p => p.available).length;
-  const categories = [...new Set(allProducts.map(p => p.product_type).filter(t => t))];
-  
+async function buildContext(intent, products, metadata, query) {
   let context = `📊 E-SHOP ŠTATISTIKY:\n`;
-  context += `- Celkom produktov: ${allProducts.length}\n`;
-  context += `- Skladom: ${availableCount}\n`;
-  context += `- Kategórie: ${categories.join(', ') || 'neuvedené'}\n\n`;
+  context += `- Celkom produktov v databáze: ${metadata.count}\n`;
+  context += `- Posledná aktualizácia: ${metadata.lastUpdate}\n\n`;
 
-  // Podľa intentu uprav výstup
-  if (intent === 'count_query') {
-    context += `📦 KOMPLETNÝ ZOZNAM PRODUKTOV:\n`;
-    allProducts.forEach((p, i) => {
-      context += `${i + 1}. ${p.title} - €${p.price.toFixed(2)} ${p.available ? '✅ skladom' : '❌ vypredané'}\n`;
-    });
-    return context;
-  }
-
-  // Pre ostatné intenty - zobraz relevantné produkty
-  const relevantProducts = scoredProducts.filter(p => p.score > 0);
-  const productsToShow = relevantProducts.length > 0 ? relevantProducts : scoredProducts.slice(0, 10);
-
-  if (relevantProducts.length > 0) {
-    context += `🎯 NÁJDENÉ PRODUKTY (zoradené podľa relevancie):\n\n`;
-  } else {
-    context += `📦 DOSTUPNÉ PRODUKTY:\n\n`;
-  }
-
-  productsToShow.forEach((product, index) => {
-    context += `${index + 1}. **${product.title}**`;
-    if (product.score > 0) {
-      context += ` [skóre: ${product.score}]`;
-    }
-    context += `\n`;
-    
-    // Varianty s cenami
-    if (product.variants && product.variants.length > 1) {
-      context += `   💰 VARIANTY A CENY:\n`;
-      product.variants.forEach(v => {
-        if (v.title) {
-          context += `      • ${v.title}: €${v.price.toFixed(2)}`;
-          if (v.compare_at_price > v.price) {
-            context += ` (zľava z €${v.compare_at_price.toFixed(2)})`;
-          }
-          context += v.available ? ` ✅ (${v.inventory_quantity} ks)` : ' ❌ vypredané';
-          context += `\n`;
-        }
+  // Pre kategórie - zobraz dostupné kategórie
+  if (intent === 'category_query') {
+    try {
+      const categories = await getAllCategories();
+      context += `📁 DOSTUPNÉ KATEGÓRIE:\n`;
+      categories.slice(0, 20).forEach(cat => {
+        context += `- ${cat.name} (${cat.count} produktov)\n`;
       });
-    } else {
-      context += `   💰 Cena: €${product.price.toFixed(2)}`;
-      if (product.has_discount) {
-        context += ` (pôvodne €${product.compare_at_price.toFixed(2)}, zľava ${product.discount_percentage}%)`;
+      context += `\n`;
+    } catch (e) {
+      console.warn('Could not fetch categories:', e);
+    }
+  }
+
+  // Zobraz nájdené produkty
+  if (products.length > 0) {
+    context += `🎯 NÁJDENÉ PRODUKTY (zoradené podľa relevancie):\n\n`;
+    
+    products.forEach((product, index) => {
+      context += `${index + 1}. **${product.title}**`;
+      if (product.score > 0) {
+        context += ` [skóre: ${product.score}]`;
       }
       context += `\n`;
-      context += `   📦 Dostupnosť: ${product.available ? `✅ SKLADOM (${product.total_inventory} ks)` : '❌ VYPREDANÉ'}\n`;
-    }
-    
-    if (product.product_type) {
-      context += `   📁 Kategória: ${product.product_type}\n`;
-    }
-    
-    if (product.description) {
-      const shortDesc = product.description.substring(0, 120);
-      context += `   📝 ${shortDesc}${product.description.length > 120 ? '...' : ''}\n`;
-    }
-    
-    context += `\n`;
-  });
+      
+      // Cena
+      if (product.has_discount && product.sale_price) {
+        context += `   💰 Cena: €${product.sale_price.toFixed(2)} (pôvodne €${product.price.toFixed(2)}, zľava ${product.discount_percentage}%)\n`;
+      } else {
+        context += `   💰 Cena: €${product.price.toFixed(2)}\n`;
+      }
+      
+      // Dostupnosť
+      context += `   📦 Dostupnosť: ${product.available ? '✅ SKLADOM' : '❌ NEDOSTUPNÉ'}`;
+      if (product.stock_quantity > 0) {
+        context += ` (${product.stock_quantity} ks)`;
+      }
+      context += `\n`;
+      
+      // Kategória a značka
+      if (product.category) {
+        context += `   📁 Kategória: ${product.category}\n`;
+      }
+      if (product.brand) {
+        context += `   🏷️ Značka: ${product.brand}\n`;
+      }
+      
+      // Popis (skrátený)
+      if (product.description) {
+        const shortDesc = product.description.substring(0, 150);
+        context += `   📝 ${shortDesc}${product.description.length > 150 ? '...' : ''}\n`;
+      }
+      
+      // URL
+      if (product.url) {
+        context += `   🔗 ${product.url}\n`;
+      }
+      
+      context += `\n`;
+    });
+  } else {
+    context += `❌ Pre dotaz "${query}" neboli nájdené žiadne produkty.\n`;
+    context += `Skúste upraviť vyhľadávacie slová alebo sa opýtať na kategóriu.\n`;
+  }
 
   return context;
 }

@@ -18,8 +18,13 @@
   ],
   "crons": [
     {
-      "path": "/api/syncProducts",
+      "path": "/api/syncXML",
       "schedule": "0 6 * * *"
     }
-  ]
+  ],
+  "functions": {
+    "api/syncXML.js": {
+      "maxDuration": 300
+    }
+  }
 }

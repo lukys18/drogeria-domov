@@ -9,14 +9,17 @@
 }
 
 :root {
-  --primary-color: #401dbf;
-  --primary-hover: #5028d9;
-  --background-dark: #0a0a0a;
-  --background-lighter: #1a1a1a;
-  --glass-bg: rgba(255, 255, 255, 0.05);
-  --glass-border: rgba(255, 255, 255, 0.1);
-  --text-primary: #ffffff;
-  --text-secondary: #a0a0a0;
+  --primary-color: #337ab7;
+  --primary-hover: #286090;
+  --primary-light: #5fa2d8;
+  --background-dark: #ffffff;
+  --background-lighter: #f8f9fa;
+  --glass-bg: #f5f7fa;
+  --glass-border: #e1e8ed;
+  --text-primary: #2c3e50;
+  --text-secondary: #6c757d;
+  --shadow-light: rgba(51, 122, 183, 0.15);
+  --shadow-medium: rgba(51, 122, 183, 0.25);
 }
 
 /* Clean hyperlink styles */
@@ -98,12 +101,12 @@ body.iframe-mode .user-status {
   position: fixed;
   bottom: 20px;
   right: 20px;
-  width: 360px;
+  width: 380px;
   height: 100%;
-  max-height: 600px;
+  max-height: 620px;
   background: var(--background-dark);
-  border-radius: 24px;
-  box-shadow: 0 20px 60px rgba(64, 29, 191, 0.3), 0 0 0 1px var(--glass-border);
+  border-radius: 20px;
+  box-shadow: 0 10px 40px var(--shadow-medium), 0 0 0 1px var(--glass-border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -114,9 +117,8 @@ body.iframe-mode .user-status {
               box-shadow 0.3s ease;
   z-index: 9999;
   box-sizing: border-box;
-  border: none;
+  border: 1px solid var(--glass-border);
   font-family: 'Manrope', sans-serif;
-  backdrop-filter: blur(20px);
 }
 
 /* Keď je v iframe, vyplní celý priestor */
@@ -137,7 +139,7 @@ body.iframe-mode #chatbot-container {
   max-height: 60px;
   width: 60px;
   border-radius: 50%;
-  box-shadow: 0 8px 32px rgba(64, 29, 191, 0.4), 0 0 0 1px var(--glass-border);
+  box-shadow: 0 8px 24px var(--shadow-medium), 0 0 0 1px var(--glass-border);
   transition: width 0.6s cubic-bezier(0.23, 1, 0.32, 1), 
               height 0.6s cubic-bezier(0.23, 1, 0.32, 1),
               max-height 0.6s cubic-bezier(0.23, 1, 0.32, 1),
@@ -169,11 +171,10 @@ body.iframe-mode #chatbot-container.closed {
 
 #chatbot-container.closed #chatbot-header-closed {
   display: block !important;
-  background: var(--glass-bg);
+  background: var(--primary-color);
   padding: 0;
   cursor: pointer;
-  border: 1px solid var(--glass-border);
-  backdrop-filter: blur(20px);
+  border: none;
   height: 60px;
   width: 60px;
   border-radius: 50%;
@@ -184,7 +185,8 @@ body.iframe-mode #chatbot-container.closed {
   opacity: 1;
   transform: scale(1);
   transition: opacity 0.4s cubic-bezier(0.23, 1, 0.32, 1),
-              transform 0.4s cubic-bezier(0.23, 1, 0.32, 1);
+              transform 0.4s cubic-bezier(0.23, 1, 0.32, 1),
+              background 0.3s ease;
   margin: 0 !important;
 }
 
@@ -197,22 +199,22 @@ body.iframe-mode #chatbot-container.closed #chatbot-header-closed {
 
 #chatbot-container.closed #chatbot-header-closed:hover {
   transform: scale(1.05);
-  opacity: 0.9;
+  background: var(--primary-hover);
+}
 }
 
 #chatbot-header-closed {
-  background: var(--glass-bg);
+  background: var(--primary-color);
   color: white;
   padding: 0;
   cursor: pointer;
   font-weight: 500;
   font-size: 1em;
-  border-bottom: 1px solid var(--glass-border);
-  backdrop-filter: blur(20px);
+  border-bottom: none;
 }
 
 #chatbot-header {
-  background: var(--glass-bg);
+  background: var(--primary-color);
   color: white;
   padding: 20px 24px;
   cursor: pointer;
@@ -221,8 +223,7 @@ body.iframe-mode #chatbot-container.closed #chatbot-header-closed {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-bottom: 1px solid var(--glass-border);
-  backdrop-filter: blur(20px);
+  border-bottom: none;
   opacity: 1;
   transform: translateY(0);
   transition: opacity 0.4s cubic-bezier(0.23, 1, 0.32, 1),
@@ -257,16 +258,28 @@ body.iframe-mode #chatbot-container.closed #chatbot-header-closed {
   display: block;
 }
 
+.chat-icon-placeholder {
+  height: 40px;
+  width: 40px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 18px;
+}
+
 .status-indicator {
   position: absolute;
   bottom: 2px;
   right: 2px;
   width: 10px;
   height: 10px;
-  background: var(--primary-color);
+  background: #28a745;
   border-radius: 50%;
-  border: 2px solid var(--background-dark);
-  box-shadow: 0 0 8px var(--primary-color);
+  border: 2px solid var(--primary-color);
+  box-shadow: 0 0 8px rgba(40, 167, 69, 0.6);
 }
 
 .user-details {
@@ -279,7 +292,7 @@ body.iframe-mode #chatbot-container.closed #chatbot-header-closed {
 .user-name {
   font-weight: 600;
   font-size: 15px !important;
-  color: var(--text-primary);
+  color: #ffffff;
   line-height: 1.2;
   margin: 0;
   padding: 0;
@@ -288,7 +301,7 @@ body.iframe-mode #chatbot-container.closed #chatbot-header-closed {
 
 .user-status {
   font-size: 12px !important;
-  color: var(--text-secondary);
+  color: rgba(255, 255, 255, 0.85);
   font-weight: 500;
   line-height: 1.2;
   margin: 0;
@@ -391,13 +404,14 @@ body.iframe-mode #chatbot-container.closed #chatbot-header-closed {
   position: relative;
   z-index: 100;
   border-radius: 16px 16px 4px 16px;
-  box-shadow: 0 4px 12px rgba(64, 29, 191, 0.25);
+  box-shadow: 0 4px 12px var(--shadow-light);
 }
 
 .message.bot {
   align-self: flex-start;
   background: var(--glass-bg);
   color: var(--text-primary);
+  border: 1px solid var(--glass-border);
   position: relative;
   z-index: 100;
   border-radius: 16px 16px 16px 4px;
@@ -486,8 +500,8 @@ body.iframe-mode #chatbot-container.closed #chatbot-header-closed {
 
 #user-input:focus {
   border-color: var(--primary-color);
-  background: var(--glass-bg);
-  box-shadow: 0 0 0 3px rgba(64, 29, 191, 0.15);
+  background: #ffffff;
+  box-shadow: 0 0 0 3px var(--shadow-light);
 }
 
 button {
@@ -512,12 +526,12 @@ button {
 button:hover {
   background: var(--primary-hover);
   transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(64, 29, 191, 0.3);
+  box-shadow: 0 8px 20px var(--shadow-medium);
 }
 
 button:active {
   transform: translateY(0);
-  box-shadow: 0 4px 12px rgba(64, 29, 191, 0.25);
+  box-shadow: 0 4px 12px var(--shadow-light);
 }
 
 /* Quick Reply buttony */
@@ -530,9 +544,9 @@ button:active {
 }
 
 .quick-reply-btn {
-  background: var(--glass-bg);
-  color: var(--text-primary);
-  border: 1px solid var(--glass-border);
+  background: #ffffff;
+  color: var(--primary-color);
+  border: 1px solid var(--primary-color);
   border-radius: 10px;
   padding: 10px 16px;
   font-size: 13px;
@@ -548,7 +562,6 @@ button:active {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  backdrop-filter: blur(10px);
 }
 
 .quick-reply-btn:hover {
@@ -556,12 +569,12 @@ button:active {
   border-color: var(--primary-color);
   color: white;
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(64, 29, 191, 0.25);
+  box-shadow: 0 4px 12px var(--shadow-light);
 }
 
 .quick-reply-btn:active {
   transform: translateY(0);
-  box-shadow: 0 2px 8px rgba(64, 29, 191, 0.2);
+  box-shadow: 0 2px 8px var(--shadow-light);
 }
 
 /* Contact button - prémiový štýl */
@@ -585,13 +598,13 @@ button:active {
   align-items: center;
   justify-content: center;
   margin: 10px 0;
-  box-shadow: 0 4px 12px rgba(64, 29, 191, 0.25);
+  box-shadow: 0 4px 12px var(--shadow-light);
 }
 
 .contact-btn:hover {
   background: var(--primary-hover);
   transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(64, 29, 191, 0.35);
+  box-shadow: 0 8px 20px var(--shadow-medium);
 }
 
 .contact-btn:active {

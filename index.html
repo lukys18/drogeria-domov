@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>TEST E-shop Asistent</title>
+  <title>Drogéria Domov - Asistent</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link rel="stylesheet" href="bot.css">
   <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
@@ -21,12 +21,14 @@
       <!-- Kompletný režim (otvorený) -->
       <div class="user-info">
         <div class="avatar-wrapper">
-          <img src="ragnetiq logo.png" alt="TEST Asistent">
+          <div class="chat-icon-placeholder">
+            <i class="fas fa-comments"></i>
+          </div>
           <div class="status-indicator"></div>
         </div>
         <div class="user-details">
-          <div class="user-name">TEST Asistent</div>
-          <div class="user-status">Online</div>
+          <div class="user-name">Drogéria Domov</div>
+          <div class="user-status">Online • Tu som pre vás</div>
         </div>
       </div>
       
@@ -35,7 +37,7 @@
 
     <!-- Header pre zatvorený stav -->
     <div id="chatbot-header-closed" onclick="toggleChatbot()" style="display: none;">
-      <img src="ragnetiq logo.png" alt="TEST Asistent" style="height:40px; width:40px; border-radius:50%; object-fit:cover;">
+      <i class="fas fa-comments" style="font-size: 24px; color: white;"></i>
     </div>
 
     <div id="chatbot-body">
@@ -43,7 +45,7 @@
         <!-- Úvodná správa bude pridaná cez JavaScript -->
       </div>
       <div id="input-area">
-        <textarea id="user-input" placeholder="Napíšte správu..."></textarea>
+        <textarea id="user-input" placeholder="Napíšte svoju otázku..."></textarea>
         <button onclick="sendMessage()"><i class="fas fa-paper-plane"></i></button>
       </div>
     </div>
@@ -60,7 +62,33 @@
     let chatHistory = [
       {
         role: "system",
-        content: "Si TEST - priateľský a nápomocný AI asistent e-shopu. DÔLEŽITÉ PRAVIDLÁ: 1) POUŽÍVAJ INFORMÁCIE Z KONTEXTU - produkty, ceny, dostupnosť zo Shopify. 2) Pri produktoch VŽDY uveď: názov, cenu, dostupnosť (skladom/vypredané). 3) Ak je produkt v zľave, zdôrazni pôvodnú a novú cenu. 4) Ak produkt nie je skladom, ponúkni podobné alternatívy. 5) Pomáhaj zákazníkom nájsť správny produkt - pýtaj sa na ich potreby. 6) Pri dotazoch na veľkosť/farbu ponúkni dostupné varianty. 7) Odpovedaj priateľsky, profesionálne a stručne. 8) PAMÄTAJ SI celú konverzáciu. 9) Ak nemáš informácie, povedz že produkty sa načítavajú alebo odporuč kontaktovať podporu. 10) Pri odporúčaniach vysvetli PREČO produkt odporúčaš."
+        content: `Si priateľský a nápomocný AI asistent pre e-shop Drogéria Domov (drogeriadomov.sk). 
+
+TVOJE HLAVNÉ ÚLOHY:
+1) VYHĽADÁVANIE PRODUKTOV - Pomôž zákazníkom nájsť drogériu, kozmetiku, čistiace prostriedky, hygienické potreby a ďalšie produkty.
+2) ODPORÚČANIA - Na základe potrieb zákazníka odporuč vhodné produkty. Vždy vysvetli PREČO daný produkt odporúčaš.
+3) INFORMÁCIE O PRODUKTOCH - Uvádzaj názov, cenu, dostupnosť, značku a popis produktu.
+4) PORADENSTVO - Poraď s výberom produktov pre rôzne potreby (upratovanie, starostlivosť o pleť, vlasy, domácnosť atď.).
+
+PRAVIDLÁ:
+- VŽDY používaj informácie z kontextu - produkty, ceny, dostupnosť
+- Pri produktoch VŽDY uveď: názov, cenu (€), či je skladom
+- Ak je produkt v zľave, zdôrazni pôvodnú a novú cenu
+- Ak produkt nie je dostupný, ponúkni podobné alternatívy
+- Odpovedaj v slovenčine, priateľsky a profesionálne
+- Buď stručný ale informatívny
+- Pri odporúčaniach vždy vysvetli prečo daný produkt odporúčaš
+- Ak nemáš dostatok informácií, povedz že produkt hľadáš alebo odporuč kontaktovať zákaznícku podporu
+- PAMÄTAJ SI celú konverzáciu
+
+KATEGÓRIE PRODUKTOV:
+- Drogéria a kozmetika
+- Čistiace a upratovacie prostriedky
+- Starostlivosť o telo a vlasy
+- Hygienické potreby
+- Domáce potreby
+- Produkty pre deti
+- Pracie prostriedky`
       }
     ];
 
@@ -101,15 +129,15 @@
       }
       
       // Zobrazenie úvodnej správy
-      appendMessage("TEST", "Ahoj! 👋 Som váš e-shop asistent. Pomôžem vám nájsť produkty, skontrolovať dostupnosť alebo zodpovedať vaše otázky. Čo hľadáte?", "bot", false, false, false);
+      appendMessage("Drogéria Domov", "Dobrý deň! 👋 Som váš virtuálny asistent pre e-shop Drogéria Domov. Pomôžem vám nájsť produkty, poradím s výberom alebo zodpoviem vaše otázky. Ako vám môžem pomôcť?", "bot", false, false, false);
       const quickRepliesDiv = document.createElement('div');
       quickRepliesDiv.className = 'quick-replies';
       quickRepliesDiv.innerHTML = `
-        <button class="quick-reply-btn" onclick="handleQuickReply('Čo máte v ponuke?')">Produkty</button>
-        <button class="quick-reply-btn" onclick="handleQuickReply('Máte nejaké zľavy?')">Akcie</button>
-        <button class="quick-reply-btn" onclick="handleQuickReply('Aké sú možnosti dopravy?')">Doprava</button>
-        <button class="quick-reply-btn" onclick="handleQuickReply('Ako môžem vrátiť tovar?')">Vrátenie</button>
-        <button class="quick-reply-btn" onclick="handleQuickReply('Kontakt')">Kontakt</button>
+        <button class="quick-reply-btn" onclick="handleQuickReply('Hľadám čistiace prostriedky')">Čistiace prostriedky</button>
+        <button class="quick-reply-btn" onclick="handleQuickReply('Hľadám kozmetiku')">Kozmetika</button>
+        <button class="quick-reply-btn" onclick="handleQuickReply('Pracie prášky a gély')">Pracie prostriedky</button>
+        <button class="quick-reply-btn" onclick="handleQuickReply('Máte nejaké akcie?')">Akcie a zľavy</button>
+        <button class="quick-reply-btn" onclick="handleQuickReply('Potrebujem poradiť s výberom')">Poradenstvo</button>
       `;
       chatbox.appendChild(quickRepliesDiv);
     });
@@ -217,7 +245,7 @@
             
             // Úspešná správa
             const botSuccessMessage = "🎉 **Ďakujeme!** Vaša správa bola úspešne odoslaná. Odpovieme vám čo najskôr.";
-            appendMessage("TEST", botSuccessMessage, "bot");
+            appendMessage("Asistent", botSuccessMessage, "bot");
             
             // ============================================================
             // MARK SESSION AS EMAIL SUBMITTED & SAVE TO DATABASE
@@ -240,7 +268,7 @@
             console.log('FAILED...', error);
             
             // Chybová správa
-            appendMessage("TEST", "❌ **Ups!** Nastala chyba pri odosielaní správy. Skúste to prosím znovu alebo nás kontaktujte priamo.", "bot");
+            appendMessage("Asistent", "❌ **Ups!** Nastala chyba pri odosielaní správy. Skúste to prosím znovu alebo nás kontaktujte priamo.", "bot");
             
             // Obnoviť tlačidlo
             submitBtn.disabled = false;
@@ -294,7 +322,7 @@ async function sendMessage() {
   chatHistory.push({ role: "user", content: message });
 
   // Zobraz typing animáciu
-  appendMessage("TEST", "typing", "bot", true);
+  appendMessage("Asistent", "typing", "bot", true);
 
   try {
     await delay(800);
@@ -395,7 +423,7 @@ async function sendMessage() {
                             sources.some(source => source.toLowerCase().includes("kontakt"));
 
     removeLastBotMessage();
-    appendMessage("TEST", reply, "bot", false, false, isInsufficientAnswer || isContactRelated);
+    appendMessage("Asistent", reply, "bot", false, false, isInsufficientAnswer || isContactRelated);
     
     // Pridaj odpoveď asistenta do histórie pre budúcu pamäť
     chatHistory.push({ role: "assistant", content: reply });
@@ -412,9 +440,9 @@ async function sendMessage() {
     
     // Fallback pre lokálne testovanie
     if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-      appendMessage("TEST", "Na túto otázku neviem dostatočne odpovedať.", "bot", false, false, true);
+      appendMessage("Asistent", "Na túto otázku neviem dostatočne odpovedať.", "bot", false, false, true);
     } else {
-      appendMessage("TEST", `Ups, nastala chyba: ${error.message}`, "bot");
+      appendMessage("Asistent", `Ups, nastala chyba: ${error.message}`, "bot");
     }
   }
 }

@@ -4,10 +4,14 @@
   "type": "module",
   "scripts": {
     "dev": "vercel dev",
+    "sync-xml": "node scripts/syncXMLLocal.js",
     "test-rag": "echo 'Otvor rag-test.html v prehliadači pre testovanie RAG systému'"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.39.0"
+    "@supabase/supabase-js": "^2.39.0",
+    "@upstash/redis": "^1.28.0",
+    "axios": "^1.6.0",
+    "xml2js": "^0.6.2"
   },
   "devDependencies": {}
 }
