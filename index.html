@@ -271,6 +271,10 @@ async function sendMessage() {
   const message = inputField.value.trim();
   if (!message) return;
 
+  console.log('═══════════════════════════════════════════════════════════');
+  console.log('🚀 [STEP 1] ODOSLANIE SPRÁVY');
+  console.log('📝 User message:', message);
+
   appendMessage("Ty", message, "user");
   inputField.value = "";
 
@@ -283,17 +287,26 @@ async function sendMessage() {
 
   // Pridaj používateľskú správu do histórie
   chatHistory.push({ role: "user", content: message });
+  console.log('📜 [STEP 2] Chat history aktualizovaná, počet správ:', chatHistory.length);
 
   // Zobraz typing animáciu
   appendMessage("Asistent", "typing", "bot", true);
+  console.log('⏳ [STEP 3] Zobrazená typing animácia');
 
   try {
     await delay(600);
 
     // Kategorizuj správu
     const category = categorizeMessage(message);
+    console.log('🏷️ [STEP 4] Kategória správy:', category);
 
     // API volanie s históriou konverzácie
+    console.log('📡 [STEP 5] Posielam API request na /api/chat');
+    console.log('📦 Request body:', JSON.stringify({ 
+      message: message,
+      history: chatHistory.slice(-6)
+    }, null, 2));
+
     const response = await fetch("/api/chat", {
       method: "POST",
       headers: {
@@ -305,40 +318,78 @@ async function sendMessage() {
       })
     });
 
+    console.log('📬 [STEP 6] API response status:', response.status, response.statusText);
+
     if (!response.ok) {
       throw new Error(`Chyba ${response.status}: ${response.statusText}`);
     }
 
     const data = await response.json();
+    console.log('📥 [STEP 7] RAW API response data:', data);
+    console.log('📥 [STEP 7a] data.reply:', data.reply);
+    console.log('📥 [STEP 7b] data.products:', data.products);
+    console.log('📥 [STEP 7c] data.products type:', typeof data.products);
+    console.log('📥 [STEP 7d] data.products is Array:', Array.isArray(data.products));
+    
     let reply = data.reply || "Prepáčte, nastala chyba pri spracovaní.";
     const products = data.products || []; // Produkty pre kartičky
 
+    console.log('🎯 [STEP 8] Spracované dáta:');
+    console.log('   📝 Reply:', reply.substring(0, 100) + '...');
+    console.log('   📦 Products count:', products.length);
+    
+    if (products.length > 0) {
+      console.log('🛒 [STEP 8a] PRODUKTY DETAIL:');
+      products.forEach((p, i) => {
+        console.log(`   ${i+1}. ${p.title}`);
+        console.log(`      - price: ${p.price}`);
+        console.log(`      - salePrice: ${p.salePrice}`);
+        console.log(`      - hasDiscount: ${p.hasDiscount}`);
+        console.log(`      - url: ${p.url}`);
+        console.log(`      - image: ${p.image}`);
+      });
+    } else {
+      console.log('⚠️ [STEP 8a] ŽIADNE PRODUKTY v odpovedi!');
+    }
+
     // Calculate response time
     const timeToRespond = Date.now() - startTime;
+    console.log('⏱️ [STEP 9] Response time:', timeToRespond, 'ms');
 
     // Kontrola či odpoveď obsahuje potrebu kontaktu
     const isContactRelated = reply.includes("kontakt") || 
                             reply.includes("napíšte nám") ||
                             reply.includes("zavolajte");
+    console.log('📞 [STEP 10] isContactRelated:', isContactRelated);
 
     removeLastBotMessage();
+    console.log('🗑️ [STEP 11] Odstránená typing animácia');
     
     // Najprv pridaj textovú odpoveď
     appendMessage("Asistent", reply, "bot", false, false, isContactRelated);
+    console.log('💬 [STEP 12] Pridaná textová odpoveď');
     
     // Ak máme produkty, zobraz ich ako klikateľné kartičky
     if (products.length > 0) {
+      console.log('🎴 [STEP 13] VOLÁM appendProductCards s', products.length, 'produktmi');
       appendProductCards(products);
+      console.log('✅ [STEP 14] appendProductCards dokončené');
+    } else {
+      console.log('⚠️ [STEP 13] PRESKAKUJEM appendProductCards - žiadne produkty');
     }
     
     // Pridaj odpoveď asistenta do histórie
     chatHistory.push({ role: "assistant", content: reply });
+    console.log('📜 [STEP 15] História aktualizovaná, celkom správ:', chatHistory.length);
 
     // Ulož chat do API
     saveChatToAPI(message, reply, currentMessageIndex, timeToRespond, category);
+    console.log('💾 [STEP 16] Chat uložený do API');
+    console.log('═══════════════════════════════════════════════════════════');
 
   } catch (error) {
-    console.error("Chyba:", error);
+    console.error("❌ [ERROR] Chyba pri spracovaní:", error);
+    console.error("❌ [ERROR] Stack trace:", error.stack);
     removeLastBotMessage();
     appendMessage("Asistent", "Prepáčte, nastala technická chyba. Skúste to prosím znovu.", "bot", false, false, true);
   }
