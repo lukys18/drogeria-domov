@@ -78,8 +78,8 @@ function enhanceQueryFromHistory(message, history, intent) {
   return message;
 }
 
-// Systémový prompt pre konverzačného asistenta
-const SYSTEM_PROMPT_BASE = `Si priateľský asistent online drogérie Drogéria Domov (drogeriadomov.sk).
+// Systémový prompt pre inteligentného konverzačného asistenta
+const SYSTEM_PROMPT_BASE = `Si priateľský a inteligentný asistent online drogérie Drogéria Domov (drogeriadomov.sk).
 
 KRITICKÉ PRAVIDLÁ:
 1. Môžeš odporúčať IBA produkty, ktoré sú uvedené v sekcii "NÁJDENÉ PRODUKTY" v kontexte.
@@ -88,16 +88,20 @@ KRITICKÉ PRAVIDLÁ:
 4. NEPÍŠ URL odkazy - produkty sa zobrazia automaticky ako klikateľné kartičky pod tvojou odpoveďou.
 5. ODPORÚČAJ LEN KATEGÓRIE Z POSKYTNUTÉHO ZOZNAMU - nevymýšľaj si vlastné kategórie!
 
-TVOJE ÚLOHY:
-1. Pomáhaj zákazníkom nájsť produkty z ponuky
-2. Pýtaj sa doplňujúce otázky ak je požiadavka príliš všeobecná
-3. Odporúčaj max 3-5 produktov z kontextu
-4. Pri odporúčaní kategórií používaj LEN tie zo zoznamu "DOSTUPNÉ KATEGÓRIE"
-5. Ak zákazník len poďakuje alebo sa lúči, odpovedz stručne a prívetivo
+INTELIGENTNÉ ODPORÚČANIE:
+1. Analyzuj potreby zákazníka (typ produktu, problém, pohlavie, vek)
+2. Ak je požiadavka príliš vágna, OPÝTAJ SA doplňujúce otázky:
+   - "Je to pre muža alebo ženu?"
+   - "Na aký typ pleti/vlasov?"
+   - "Preferujete nejakú značku?"
+   - "Je to pre vás alebo ako darček?"
+3. Pri odporúčaní vysvetli PREČO daný produkt odporúčaš (napr. "Tento produkt je ideálny pre citlivú pokožku...")
+4. Spomeň kľúčové benefity z popisu produktu
+5. Ak produkt má zľavu, zdôrazni to!
 
 FORMÁT ODPOVEDE (ak máš produkty v kontexte):
-- Stručne povedz čo si našiel (napr. "Našla som pre vás tieto produkty na umývanie riadu:")
-- Môžeš spomenúť názvy produktov a ceny
+- Stručne povedz čo si našiel a PREČO sú tieto produkty vhodné
+- Spomeň názvy produktov, ceny a kľúčové benefity
 - NEPÍŠ URL odkazy - produkty sa zobrazia ako obrázky pod tvojou správou automaticky
 
 AK NEMÁŠ PRODUKTY V KONTEXTE A ZÁKAZNÍK SA PÝTA NA PRODUKT:
@@ -106,9 +110,9 @@ AK NEMÁŠ PRODUKTY V KONTEXTE A ZÁKAZNÍK SA PÝTA NA PRODUKT:
 - NEVYMÝŠĽAJ žiadne produkty ani značky
 - Pri odporúčaní kategórií používaj LEN tie z "DOSTUPNÉ KATEGÓRIE"
 
-AK ZÁKAZNÍK NEPÝTA NA PRODUKTY (ďakuje, zdraví, všeobecná otázka):
-- Odpovedz prirodzene a stručne
-- Nepýtaj sa hneď na produkty, ak to nie je relevantné
+CROSS-SELL A UPSELL:
+- Po odporúčaní hlavného produktu môžeš navrhnúť doplnkový produkt
+- Napr. "K tomuto šampónu by sa hodil aj kondicionér tej istej značky"
 
 Odpovedaj VŽDY po slovensky, priateľsky a stručne.`;
 
@@ -392,7 +396,10 @@ async function buildContext(message, intent) {
     brands: [],
     stats: null,
     searchInfo: null,
-    categoriesPrompt: null  // Pre dynamický system prompt
+    categoriesPrompt: null,  // Pre dynamický system prompt
+    analysis: null,          // Analýza požiadavky
+    needsClarification: false,
+    clarificationQuestion: null
   };
   
   console.log('🏗️ Budujem kontext pre zámer:', intent.type);
@@ -459,12 +466,22 @@ async function buildContext(message, intent) {
           terms: result.terms,
           query: result.query
         };
+        context.analysis = result.analysis;
+        context.needsClarification = result.needsClarification;
+        context.clarificationQuestion = result.clarificationQuestion;
         
         console.log('🔍 Výsledky:', {
           počet: context.products.length,
           celkom: context.searchInfo?.total || 0,
-          produkty: context.products.map(p => p.title)
+          produkty: context.products.map(p => `${p.title} (skóre: ${p._score})`),
+          needsClarification: context.needsClarification
         });
+        
+        // Ak potrebujeme spresnenie ale máme nejaké výsledky, aj tak ich ukážeme
+        if (context.needsClarification && context.products.length > 0) {
+          console.log('💡 Máme výsledky ale môžeme spresniť - ukážeme produkty + otázku');
+          context.needsClarification = false; // Ukážeme produkty
+        }
         
         // Ak nenašiel nič, skús jednotlivé slová
         if (context.products.length === 0) {
@@ -475,6 +492,7 @@ async function buildContext(message, intent) {
             if (fallback.products.length > 0) {
               context.products = fallback.products;
               context.searchInfo = { total: fallback.total, terms: fallback.terms, query: word };
+              context.analysis = fallback.analysis;
               console.log(`✅ Našiel ${fallback.products.length} produktov pre "${word}"`);
               break;
             }
@@ -494,7 +512,9 @@ async function buildContext(message, intent) {
     produkty: context.products.length,
     kategórie: context.categories.length,
     značky: context.brands.length,
-    stats: !!context.stats
+    stats: !!context.stats,
+    analysis: context.analysis ? 'áno' : 'nie',
+    needsClarification: context.needsClarification
   });
   
   return context;
@@ -524,31 +544,80 @@ function buildMessages(message, history, context, intent) {
 - Top značky: ${context.stats.topBrands.map(b => b.name).join(', ')}`;
   }
   
+  // Ak máme analýzu požiadavky, pridaj ju do kontextu
+  if (context.analysis) {
+    const a = context.analysis;
+    let analysisInfo = `\nANALÝZA POŽIADAVKY ZÁKAZNÍKA:`;
+    
+    if (a.productType) {
+      analysisInfo += `\n- Hľadaný typ produktu: ${a.productType}`;
+    }
+    if (a.targetGender) {
+      analysisInfo += `\n- Pohlavie: ${a.targetGender === 'female' ? 'žena' : a.targetGender === 'male' ? 'muž' : 'deti'}`;
+    }
+    if (a.targetAgeGroup) {
+      analysisInfo += `\n- Veková skupina: ${a.targetAgeGroup === 'kids' ? 'deti' : a.targetAgeGroup === 'senior' ? 'seniori' : 'dospelí'}`;
+    }
+    if (a.problems.length > 0) {
+      analysisInfo += `\n- Identifikované problémy: ${a.problems.join(', ')}`;
+    }
+    if (a.preferredBrand) {
+      analysisInfo += `\n- Preferovaná značka: ${a.preferredBrand}`;
+    }
+    if (a.preferences.length > 0) {
+      analysisInfo += `\n- Preferencie: ${a.preferences.join(', ')}`;
+    }
+    if (a.wantsDiscount) {
+      analysisInfo += `\n- Zákazník hľadá zľavy/akcie`;
+    }
+    
+    contextMessage += analysisInfo;
+  }
+  
   if (context.products && context.products.length > 0) {
-    contextMessage = `PÔVODNÁ POŽIADAVKA ZÁKAZNÍKA: "${message}"
+    contextMessage += `\n\nPÔVODNÁ POŽIADAVKA ZÁKAZNÍKA: "${message}"
 
 NÁJDENÉ PRODUKTY (${context.products.length} z ${context.searchInfo?.total || '?'}):
 
-${context.products.map((p, i) => `${i + 1}. **${p.title}**
+${context.products.map((p, i) => {
+  let productInfo = `${i + 1}. **${p.title}**
    Značka: ${p.brand || 'neuvedená'}
    Kategória: ${p.category || p.categoryMain}
-   Cena: ${p.salePrice ? `~~${p.price}€~~ **${p.salePrice}€** (-${p.discountPercent}%)` : `${p.price}€`}
-   ${p.description ? `Popis: ${p.description.substring(0, 100)}...` : ''}
-   URL: ${p.url}`).join('\n\n')}
+   Cena: ${p.salePrice ? `~~${p.price}€~~ **${p.salePrice}€** (-${p.discountPercent}%)` : `${p.price}€`}`;
+   
+  // Pridaj relevanciu z analýzy
+  if (p._score) {
+    productInfo += `\n   Skóre relevancie: ${p._score}/100`;
+  }
+  if (p._breakdown) {
+    const b = p._breakdown;
+    if (b.productType > 0) productInfo += ` (typ produktu: ✓)`;
+    if (b.targetGroup > 0) productInfo += ` (cieľová skupina: ✓)`;
+    if (b.problemSolving > 0) productInfo += ` (rieši problém: ✓)`;
+  }
+  
+  if (p.description) {
+    productInfo += `\n   Popis: ${p.description.substring(0, 150)}...`;
+  }
+  
+  return productInfo;
+}).join('\n\n')}
 
-DÔLEŽITÉ: Skontroluj či tieto produkty skutočne zodpovedajú požiadavke zákazníka!
-- Ak produkty NIE SÚ relevantné k tomu čo zákazník hľadá, NEODPORÚČAJ ICH.
-- Namiesto toho sa ospravedlň a opýtaj sa na upresnenie.
-- Napríklad: ak zákazník hľadá "makeup" ale výsledky sú oleje na tvár, povedz že makeup produkty (rúže, tiene, riasenky) momentálne nemáš v ponuke.`;
+DÔLEŽITÉ INŠTRUKCIE:
+- Produkty sú už ZORADENÉ podľa relevancie (najrelevantnejší prvý)
+- Pri odporúčaní zdôrazni PREČO je daný produkt vhodný pre zákazníka
+- Spomeň kľúčové benefity z popisu
+- Ak má produkt zľavu, zdôrazni to!
+- Skontroluj či tieto produkty skutočne zodpovedajú požiadavke zákazníka!`;
   }
   
   if (context.categories && context.categories.length > 0 && !context.products.length) {
-    contextMessage = `KATEGÓRIE V OBCHODE:
+    contextMessage += `\n\nKATEGÓRIE V OBCHODE:
 ${context.categories.slice(0, 10).map(c => `- ${c.name} (${c.count} produktov)`).join('\n')}`;
   }
   
   if (context.brands && context.brands.length > 0) {
-    contextMessage = `ZNAČKY V OBCHODE:
+    contextMessage += `\n\nZNAČKY V OBCHODE:
 ${context.brands.slice(0, 15).map(b => `- ${b.name} (${b.count} produktov)`).join('\n')}`;
   }
   
@@ -562,12 +631,18 @@ NEODPORÚČAJ produkty! Namiesto toho sa HO OPÝTAJ na konkrétnejšiu požiadav
 Príklady otázok:
 - Na čo konkrétne to potrebujete? (napr. podlaha, okná, WC, kuchyňa...)
 - Hľadáte niečo na konkrétny účel alebo od nejakej značky?
-- Aký typ produktu by vás zaujímal?`;
+- Aký typ produktu by vás zaujímal?
+- Je to pre muža alebo ženu?`;
+  }
+  
+  // Ak potrebujeme spresnenie
+  if (context.needsClarification && context.clarificationQuestion) {
+    contextMessage += `\n\nDÔLEŽITÉ: Pre lepšie výsledky sa opýtaj zákazníka: "${context.clarificationQuestion}"`;
   }
   
   // Ak nemáme produkty ani iný kontext, upozorni AI (ale len ak hľadal produkty)
-  if (!contextMessage && !conversationalIntents.includes(intent.type)) {
-    contextMessage = `UPOZORNENIE: Pre dotaz "${message}" som nenašiel žiadne produkty v databáze.
+  if (!context.products?.length && !conversationalIntents.includes(intent.type) && intent.type !== 'broad_category' && intent.type !== 'general_category') {
+    contextMessage += `\n\nUPOZORNENIE: Pre dotaz "${message}" som nenašiel žiadne produkty v databáze.
 Povedz zákazníkovi, že si neistý a opýtaj sa na upresnenie požiadavky.
 NIKDY nevymýšľaj produkty - povedz že v danej kategórii môžeš vyhľadať, ak upresnia čo hľadajú.`;
   }

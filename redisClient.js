@@ -1,5 +1,6 @@
 // redisClient.js
-// Jednoduchý a spoľahlivý vyhľadávací systém pre produkty
+// Inteligentný produktový vyhľadávací systém s pokročilým skórovaním
+// Podľa Claude Opus 4.5 promptu pre Drogeriu
 
 import { Redis } from '@upstash/redis';
 
@@ -42,6 +43,430 @@ const STOPWORDS = new Set([
   'prosim', 'dakujem', 'ahoj', 'dobry', 'den'
 ]);
 
+// ═══════════════════════════════════════════════════════════════════════════
+// ANALÝZA CIEĽOVEJ SKUPINY - Extrakcia z produktových dát
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Analyzuje produkt a extrahuje cieľovú skupinu
+ * @param {Object} product - Produktový objekt
+ * @returns {Object} - { gender: 'male'|'female'|'unisex', ageGroup: 'kids'|'adult'|'senior' }
+ */
+function analyzeTargetGroup(product) {
+  const title = normalize(product.title || '');
+  const description = normalize(product.description || '');
+  const category = normalize(product.category || product.categoryMain || '');
+  const combined = `${title} ${description} ${category}`;
+  
+  // === POHLAVIE ===
+  let gender = 'unisex';
+  
+  // Ženské indikátory
+  const femalePatterns = /damsk|pre zeny|women|lady|girl|zensky|feminine|damska|diva|princess|pink lady/;
+  // Mužské indikátory
+  const malePatterns = /pansk|pre muzov|men\b|man\b|muzsky|gentleman|masculine|beard|brady|fuz|barber/;
+  // Unisex indikátory (priorita)
+  const unisexPatterns = /invisible|universal|unisex|family|rodina|all skin|vsetky typy/;
+  
+  if (unisexPatterns.test(combined)) {
+    gender = 'unisex';
+  } else if (femalePatterns.test(combined)) {
+    gender = 'female';
+  } else if (malePatterns.test(combined)) {
+    gender = 'male';
+  }
+  
+  // === VEK ===
+  let ageGroup = 'adult';
+  
+  // Detské indikátory
+  const kidsPatterns = /baby|babat|kids|deti|detsk|junior|child|dieta|novorodenc|toddler/;
+  // Seniorské indikátory
+  const seniorPatterns = /50\+|60\+|anti[\s-]?age|mature|senior|starsi/;
+  
+  if (kidsPatterns.test(combined)) {
+    ageGroup = 'kids';
+  } else if (seniorPatterns.test(combined)) {
+    ageGroup = 'senior';
+  }
+  
+  return { gender, ageGroup };
+}
+
+/**
+ * Analyzuje požiadavku používateľa a extrahuje preferencie
+ * @param {string} query - Dotaz používateľa
+ * @returns {Object} - Preferencie a potreby používateľa
+ */
+function analyzeUserRequest(query) {
+  const normalized = normalize(query);
+  const lower = query.toLowerCase();
+  
+  const analysis = {
+    // Cieľová skupina
+    targetGender: null,      // male, female, null (neznáme)
+    targetAgeGroup: null,    // kids, adult, senior, null
+    
+    // Typ produktu
+    productType: null,       // šampón, krém, dezodorant...
+    productCategory: null,   // konkrétna kategória
+    
+    // Problém/potreba
+    problems: [],            // suché vlasy, akné, potenie...
+    
+    // Preferencie
+    preferredBrand: null,    // značka ak je uvedená
+    wantsDiscount: false,    // hľadá zľavy
+    preferences: [],         // bio, vegan, bez parfumácie...
+    
+    // Vyhľadávané termy
+    searchTerms: [],
+    
+    // Potrebuje spresnenie
+    needsClarification: false,
+    clarificationQuestion: null
+  };
+  
+  // === POHLAVIE ===
+  if (/pre zenu|zena|zeny|zensky|damsk|manzelk|priatelk|mama|sestra|dcera/i.test(normalized)) {
+    analysis.targetGender = 'female';
+  } else if (/pre muza|muz\b|muzov|muzsky|pansk|manzel|priatel\b|otec|brat|syn\b/i.test(normalized)) {
+    analysis.targetGender = 'male';
+  } else if (/pre deti|dieta|dcera|syn|baby|babatk/i.test(normalized)) {
+    analysis.targetGender = 'kids'; // Špeciálny prípad
+    analysis.targetAgeGroup = 'kids';
+  }
+  
+  // === VEK ===
+  if (/det|baby|babat|junior|kids|child/i.test(normalized)) {
+    analysis.targetAgeGroup = 'kids';
+  } else if (/50\+|60\+|anti[\s-]?age|senior/i.test(normalized)) {
+    analysis.targetAgeGroup = 'senior';
+  }
+  
+  // === TYP PRODUKTU ===
+  const productTypes = {
+    'šampón': /sampon|shampoo/,
+    'dezodorant': /dezodorant|deodorant|antiperspirant|sprej.*pod.*pazuch|roll[\s-]?on/,
+    'sprchový gél': /sprchov|shower|gel.*sprchan/,
+    'mydlo': /mydlo|soap|tuhé.*mydlo/,
+    'krém': /krem|cream|moistur|hydrat/,
+    'parfém': /parfem|parfum|vonavk|edt|edp|cologne|toaletn.*voda/,
+    'zubná pasta': /zubn.*past|toothpaste|pasta.*zuby/,
+    'makeup': /make[\s-]?up|mejkap|liceni|ruz\b|riasenka|tiene|pery|rteny|podklad|korektor|puder/,
+    'prací prášok': /praci|prasok|pranie|washing|detergent/,
+    'aviváž': /avivaz|fabric.*soft|zmakcov/,
+    'čistiaci prostriedok': /cistic|cleaner|upratov|cisteni|umyvan/,
+    'vlasová starostlivosť': /kondicion|maska.*vlas|serum.*vlas|olej.*vlas|balzam.*vlas/,
+    'pleťová starostlivosť': /plet|tvar|facial|serum|tonik|maska.*tvar|cisteni.*plet/,
+    'starostlivosť o ruky': /ruk|hand|nail|necht/,
+    'starostlivosť o telo': /tel|body|lotion.*tel/,
+    'opaľovací krém': /opalov|sunscreen|spf|uv.*ochran/,
+    'detská kozmetika': /baby|babat|dets.*krem|dets.*samp/
+  };
+  
+  for (const [type, pattern] of Object.entries(productTypes)) {
+    if (pattern.test(normalized)) {
+      analysis.productType = type;
+      break;
+    }
+  }
+  
+  // === PROBLÉMY/POTREBY ===
+  const problemPatterns = {
+    'suché vlasy': /such.*vlas|dry.*hair|hydrat.*vlas/,
+    'mastné vlasy': /mastn.*vlas|oily.*hair|zirn.*vlas/,
+    'lupiny': /lupin|dandruff|anti[\s-]?lupin/,
+    'vypadávanie vlasov': /vypadav|hair.*loss|padaj.*vlas/,
+    'poškodené vlasy': /poskoden|damaged|znicen.*vlas|lam.*vlas/,
+    'farbené vlasy': /farben|colored|farba.*vlas/,
+    'citlivá pokožka': /citliv|sensitive|jemn.*plet/,
+    'suchá pleť': /such.*plet|dry.*skin/,
+    'mastná pleť': /mastn.*plet|oily.*skin/,
+    'akné': /akne|acne|pupienk|vyraze|problematic/,
+    'vrásky': /vrask|wrinkle|anti[\s-]?age|starn/,
+    'potenie': /poten|sweat|antiperspi|48.*hod|long.*last/,
+    'škvrny na oblečení': /skvrn|stain|invisible|black.*white/,
+    'citlivé zuby': /citliv.*zuby|sensitive.*teeth/,
+    'bielenie zubov': /biel.*zuby|whitening|white.*teeth/,
+    'detská pokožka': /dets.*plet|baby.*skin|jemn.*dets/
+  };
+  
+  for (const [problem, pattern] of Object.entries(problemPatterns)) {
+    if (pattern.test(normalized)) {
+      analysis.problems.push(problem);
+    }
+  }
+  
+  // === PREFERENCIE ===
+  const preferencePatterns = {
+    'bio': /\bbio\b|organic|prirodn|natural/,
+    'vegan': /vegan|cruelty[\s-]?free|bez.*testovania/,
+    'bez parfumácie': /bez.*parfum|fragrance[\s-]?free|bez.*vone/,
+    'bez alkoholu': /bez.*alkohol|alcohol[\s-]?free/,
+    'bez hliníka': /bez.*hlinik|aluminum[\s-]?free|aluminium[\s-]?free/,
+    'hypoalergénny': /hypoalergenn|hypoallergenic|pre.*alergik/,
+    'dermatologicky testovaný': /dermatolog|tested|testovan/
+  };
+  
+  for (const [pref, pattern] of Object.entries(preferencePatterns)) {
+    if (pattern.test(normalized)) {
+      analysis.preferences.push(pref);
+    }
+  }
+  
+  // === ZNAČKA ===
+  const brands = [
+    'nivea', 'dove', 'rexona', 'axe', 'adidas', 'playboy', 'fa', 'palmolive',
+    'head.*shoulders', 'pantene', 'garnier', 'loreal', 'schwarzkopf', 'syoss',
+    'colgate', 'oral[\s-]?b', 'sensodyne', 'parodontax',
+    'ariel', 'persil', 'jar', 'ajax', 'domestos', 'pur', 'cif', 'vanish',
+    'pampers', 'huggies', 'johnson', 'sudocrem'
+  ];
+  
+  for (const brand of brands) {
+    const regex = new RegExp(brand, 'i');
+    if (regex.test(normalized)) {
+      analysis.preferredBrand = brand.replace(/\[.*?\]/g, '').replace(/\\/g, '');
+      break;
+    }
+  }
+  
+  // === ZĽAVY ===
+  if (/zlav|akci|vypredaj|lacn|promo|sale|znizen|special/i.test(normalized)) {
+    analysis.wantsDiscount = true;
+  }
+  
+  // === SEARCH TERMS ===
+  analysis.searchTerms = normalized
+    .split(/\s+/)
+    .filter(w => w.length >= 2 && !STOPWORDS.has(w));
+  
+  // === POTREBUJE SPRESNENIE? ===
+  // Ak nemáme pohlavie ale typ produktu ho vyžaduje
+  const genderSensitiveProducts = ['dezodorant', 'parfém', 'sprchový gél'];
+  if (!analysis.targetGender && genderSensitiveProducts.includes(analysis.productType)) {
+    analysis.needsClarification = true;
+    analysis.clarificationQuestion = 'Je to pre muža alebo ženu?';
+  }
+  
+  // Ak je dotaz príliš všeobecný
+  if (analysis.searchTerms.length <= 1 && !analysis.productType && !analysis.preferredBrand) {
+    analysis.needsClarification = true;
+    analysis.clarificationQuestion = 'Mohli by ste upresniť, aký typ produktu hľadáte?';
+  }
+  
+  console.log('📊 Analýza požiadavky:', JSON.stringify(analysis, null, 2));
+  
+  return analysis;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SKÓROVACÍ SYSTÉM - Ranking produktov podľa relevancie
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Vypočíta skóre relevancie produktu voči požiadavke
+ * Skóre 0-100 bodov
+ * 
+ * ROZLOŽENIE BODOV:
+ * - 40 bodov: Zhoda typu produktu (kategória)
+ * - 25 bodov: Zhoda pohlavia/cieľovej skupiny
+ * - 15 bodov: Riešenie špecifického problému (z description)
+ * - 10 bodov: Zhoda značky (ak je preferovaná)
+ * - 5 bodov: Akcia/zľava (ak je požadovaná)
+ * - 5 bodov: Dostupnosť
+ * 
+ * @param {Object} product - Produktový objekt
+ * @param {Object} analysis - Výsledok analyzeUserRequest
+ * @returns {Object} - { score, breakdown, isFiltered }
+ */
+function calculateProductScore(product, analysis) {
+  const breakdown = {
+    productType: 0,      // max 40
+    targetGroup: 0,      // max 25
+    problemSolving: 0,   // max 15
+    brandMatch: 0,       // max 10
+    discount: 0,         // max 5
+    availability: 0,     // max 5
+    termMatches: 0,      // bonus za zhodu termov
+    penalties: 0         // penalizácie
+  };
+  
+  const titleNorm = normalize(product.title || '');
+  const descNorm = normalize(product.description || '');
+  const categoryNorm = normalize(product.category || product.categoryMain || '');
+  const brandNorm = normalize(product.brand || '');
+  const combined = `${titleNorm} ${descNorm} ${categoryNorm} ${brandNorm}`;
+  
+  // Analýza cieľovej skupiny produktu
+  const productTarget = analyzeTargetGroup(product);
+  
+  // === FILTER: Nedostupné produkty ===
+  if (!product.available) {
+    return { score: 0, breakdown, isFiltered: true, filterReason: 'Nedostupný' };
+  }
+  
+  // === FILTER: Nesprávne pohlavie ===
+  if (analysis.targetGender === 'female' && productTarget.gender === 'male') {
+    return { score: 0, breakdown, isFiltered: true, filterReason: 'Nesprávne pohlavie (mužský produkt pre ženu)' };
+  }
+  if (analysis.targetGender === 'male' && productTarget.gender === 'female') {
+    return { score: 0, breakdown, isFiltered: true, filterReason: 'Nesprávne pohlavie (ženský produkt pre muža)' };
+  }
+  
+  // === FILTER: Nesprávna veková skupina (ak je striktne požadovaná) ===
+  if (analysis.targetAgeGroup === 'kids' && productTarget.ageGroup !== 'kids') {
+    // Miernejší filter - len penalizácia ak nie je detský
+    breakdown.penalties -= 15;
+  }
+  
+  // === 1. ZHODA TYPU PRODUKTU (max 40 bodov) ===
+  if (analysis.productType) {
+    const productTypes = {
+      'šampón': /sampon|shampoo/,
+      'dezodorant': /dezodorant|deodorant|antiperspirant|roll[\s-]?on|sprej/,
+      'sprchový gél': /sprchov|shower|gel/,
+      'mydlo': /mydlo|soap/,
+      'krém': /krem|cream|moistur/,
+      'parfém': /parfem|parfum|vonavk|edt|edp|toaletn.*voda/,
+      'zubná pasta': /zubn|toothpaste|pasta/,
+      'makeup': /make[\s-]?up|mejkap|liceni|ruz\b|riasenka|tiene|podklad|korektor/,
+      'prací prášok': /praci|prasok|pranie|washing/,
+      'aviváž': /avivaz|fabric|zmakcov/,
+      'čistiaci prostriedok': /cistic|cleaner|upratov/
+    };
+    
+    const typePattern = productTypes[analysis.productType];
+    if (typePattern) {
+      if (typePattern.test(titleNorm)) {
+        breakdown.productType = 40; // Plná zhoda v názve
+      } else if (typePattern.test(categoryNorm)) {
+        breakdown.productType = 30; // Zhoda v kategórii
+      } else if (typePattern.test(combined)) {
+        breakdown.productType = 15; // Čiastočná zhoda
+      }
+    }
+  } else {
+    // Ak nie je špecifikovaný typ, daj body za zhodu termov v kategórii
+    for (const term of analysis.searchTerms) {
+      if (categoryNorm.includes(term)) {
+        breakdown.productType += 10;
+      }
+    }
+    breakdown.productType = Math.min(breakdown.productType, 40);
+  }
+  
+  // === 2. ZHODA CIEĽOVEJ SKUPINY (max 25 bodov) ===
+  if (analysis.targetGender) {
+    if (analysis.targetGender === productTarget.gender) {
+      breakdown.targetGroup = 25; // Presná zhoda
+    } else if (productTarget.gender === 'unisex') {
+      breakdown.targetGroup = 15; // Unisex je OK
+    }
+  } else {
+    // Ak nie je špecifikované pohlavie, unisex dostáva bonus
+    if (productTarget.gender === 'unisex') {
+      breakdown.targetGroup = 10;
+    }
+  }
+  
+  // Veková skupina
+  if (analysis.targetAgeGroup && analysis.targetAgeGroup === productTarget.ageGroup) {
+    breakdown.targetGroup += 10;
+  }
+  
+  breakdown.targetGroup = Math.min(breakdown.targetGroup, 25);
+  
+  // === 3. RIEŠENIE PROBLÉMU (max 15 bodov) ===
+  if (analysis.problems.length > 0) {
+    const problemKeywords = {
+      'suché vlasy': /such|dry|hydrat|moistur/,
+      'mastné vlasy': /mastn|oily|oil[\s-]?control/,
+      'lupiny': /lupin|dandruff|anti[\s-]?lupin|head.*shoulders/,
+      'vypadávanie vlasov': /vypadav|hair.*loss|posiln|strength/,
+      'poškodené vlasy': /poskoden|damaged|repair|oprav/,
+      'farbené vlasy': /farben|color|protect|ochra/,
+      'citlivá pokožka': /citliv|sensitive|jemn|gentle/,
+      'suchá pleť': /such|dry|hydrat/,
+      'mastná pleť': /mastn|oily|mattif/,
+      'akné': /akne|acne|anti[\s-]?blemish|cistiac/,
+      'vrásky': /vrask|wrinkle|anti[\s-]?age|lift|firm/,
+      'potenie': /48.*h|antiperspi|dry.*protect|long.*last/,
+      'škvrny na oblečení': /invisible|black.*white|stain|bez.*skvrn/,
+      'citlivé zuby': /sensitiv|citliv/,
+      'bielenie zubov': /whiten|biel|white/
+    };
+    
+    for (const problem of analysis.problems) {
+      const pattern = problemKeywords[problem];
+      if (pattern && pattern.test(combined)) {
+        breakdown.problemSolving += 8;
+      }
+    }
+    breakdown.problemSolving = Math.min(breakdown.problemSolving, 15);
+  }
+  
+  // === 4. ZHODA ZNAČKY (max 10 bodov) ===
+  if (analysis.preferredBrand) {
+    const brandPattern = new RegExp(analysis.preferredBrand, 'i');
+    if (brandPattern.test(brandNorm) || brandPattern.test(titleNorm)) {
+      breakdown.brandMatch = 10;
+    }
+  }
+  
+  // === 5. ZĽAVA (max 5 bodov) ===
+  if (product.hasDiscount) {
+    if (analysis.wantsDiscount) {
+      breakdown.discount = 5; // Plný bonus ak hľadá zľavy
+    } else {
+      breakdown.discount = 2; // Malý bonus aj tak
+    }
+  }
+  
+  // === 6. DOSTUPNOSŤ (max 5 bodov) ===
+  if (product.available) {
+    breakdown.availability = 5;
+  }
+  
+  // === BONUS: Zhoda vyhľadávacích termov ===
+  for (const term of analysis.searchTerms) {
+    if (titleNorm.includes(term)) {
+      breakdown.termMatches += 5;
+    } else if (brandNorm.includes(term)) {
+      breakdown.termMatches += 4;
+    } else if (combined.includes(term)) {
+      breakdown.termMatches += 2;
+    }
+  }
+  
+  // === PENALIZÁCIE za preferencie ===
+  for (const pref of analysis.preferences) {
+    // Ak používateľ chce "bez hliníka" ale produkt ho obsahuje
+    if (pref === 'bez hliníka' && /alumin|hlinik/i.test(combined) && !/bez.*alumin|bez.*hlinik|alumin.*free/i.test(combined)) {
+      breakdown.penalties -= 20;
+    }
+    // Podobne pre iné preferencie
+    if (pref === 'bez parfumácie' && !/bez.*parfum|fragrance[\s-]?free|bez.*vone/i.test(combined)) {
+      breakdown.penalties -= 10;
+    }
+  }
+  
+  // === FINÁLNE SKÓRE ===
+  const score = Math.max(0, 
+    breakdown.productType + 
+    breakdown.targetGroup + 
+    breakdown.problemSolving + 
+    breakdown.brandMatch + 
+    breakdown.discount + 
+    breakdown.availability + 
+    breakdown.termMatches + 
+    breakdown.penalties
+  );
+  
+  return { score, breakdown, isFiltered: false };
+}
+
 // Načítaj všetky produkty (s cache)
 async function getAllProducts() {
   const now = Date.now();
@@ -66,210 +491,126 @@ async function getAllProducts() {
   return productsCache;
 }
 
-// Hlavná vyhľadávacia funkcia
+// Načítaj všetky produkty (s cache)
+async function getAllProducts() {
+  const now = Date.now();
+  
+  // Použij cache ak je čerstvá
+  if (productsCache && (now - cacheTime) < CACHE_TTL) {
+    return productsCache;
+  }
+  
+  const redis = getRedisClient();
+  const data = await redis.get('products:all');
+  
+  if (!data) {
+    console.log('⚠️ Žiadne produkty v databáze');
+    return [];
+  }
+  
+  productsCache = typeof data === 'string' ? JSON.parse(data) : data;
+  cacheTime = now;
+  
+  console.log(`📦 Načítaných ${productsCache.length} produktov z Redis`);
+  return productsCache;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HLAVNÁ VYHĽADÁVACIA FUNKCIA
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Inteligentné vyhľadávanie produktov s pokročilým skórovaním
+ * @param {string} query - Vyhľadávací dotaz
+ * @param {Object} options - Možnosti vyhľadávania
+ * @returns {Object} - { products, total, query, analysis, needsClarification, clarificationQuestion }
+ */
 export async function searchProducts(query, options = {}) {
   const { limit = 5, onlyAvailable = true } = options;
   
-  console.log('🔍 Vyhľadávam:', query);
+  console.log('═══════════════════════════════════════════════════════════');
+  console.log('🔍 INTELIGENTNÉ VYHĽADÁVANIE');
+  console.log('📝 Query:', query);
   
   const products = await getAllProducts();
   
   if (products.length === 0) {
-    return { products: [], total: 0, query };
+    return { products: [], total: 0, query, analysis: null };
   }
   
-  const queryLower = query.toLowerCase();
-  const queryNorm = normalize(query);
+  // 1. Analyzuj požiadavku používateľa
+  const analysis = analyzeUserRequest(query);
   
-  // === DETEKCIA INTENT A PREFEROVANEJ KATEGÓRIE ===
-  let preferredCategory = null;
-  let requiredInTitle = null;  // Slová ktoré MUSIA byť v názve produktu
-  let excludePatterns = [];    // Vzory na vylúčenie
+  console.log('🎯 Detekovaný typ produktu:', analysis.productType || 'neurčený');
+  console.log('👤 Cieľová skupina:', analysis.targetGender || 'neurčená', '/', analysis.targetAgeGroup || 'neurčená');
+  console.log('🔧 Problémy:', analysis.problems.length > 0 ? analysis.problems.join(', ') : 'žiadne');
+  console.log('🏷️ Preferovaná značka:', analysis.preferredBrand || 'žiadna');
+  console.log('💰 Hľadá zľavy:', analysis.wantsDiscount);
+  console.log('🔤 Search terms:', analysis.searchTerms.join(', '));
   
-  // MAKEUP detekcia
-  const wantsMakeup = /make\s*-?\s*up|makeup|mejkap|mejk[\s-]?ap|liceni|líčen/i.test(queryLower) && 
-                      !/odstrán|odstran|čist|cist|micel|demak|zmyv/i.test(queryLower);
-  if (wantsMakeup) {
-    preferredCategory = /dekorat|liceni|licenie|makeup|make-up|líčen|pery|oci|tiene/i;
-    excludePatterns.push(/odstran|odlicov|demak|micel|cist|umyv|hubka|olej|sprej|krem na|depilac/i);
-    console.log('💄 Intent: MAKEUP');
-  }
-  
-  // PEELING detekcia
-  const wantsPeeling = /peeling|pieling|exfoli|scrub/i.test(queryLower);
-  if (wantsPeeling) {
-    requiredInTitle = /peeling|pieling|exfoli|scrub/i;
-    console.log('🧴 Intent: PEELING - vyžadujem slovo v názve');
-  }
-  
-  // ŠAMPÓN detekcia
-  const wantsShampoo = /šamp[oó]n|sampon|shampoo/i.test(queryLower);
-  const wantsKidsShampoo = wantsShampoo && /det|bab[aä]|dieta|kids|child/i.test(queryLower);
-  if (wantsKidsShampoo) {
-    requiredInTitle = /šamp[oó]n|sampon|shampoo/i;
-    preferredCategory = /det|bab|kids|child/i;
-    excludePatterns.push(/men|man|muž|muz|gentleman|beard|brady|fuz/i);
-    console.log('👶 Intent: DETSKÝ ŠAMPÓN');
-  } else if (wantsShampoo) {
-    requiredInTitle = /šamp[oó]n|sampon|shampoo/i;
-    console.log('🧴 Intent: ŠAMPÓN');
-  }
-  
-  // PARFÉM detekcia
-  const wantsPerfume = /parf[eé]m|parfum|voňavk|vonavk|edt|edp|cologne/i.test(queryLower);
-  if (wantsPerfume) {
-    requiredInTitle = /parf|voňav|vonavk|edt|edp|cologne|toaletn.*voda/i;
-    console.log('🌸 Intent: PARFÉM');
-  }
-  
-  // ZUBNÁ PASTA detekcia
-  const wantsToothpaste = /zubn[áa]\s*past|pasta\s*na\s*zuby|toothpaste/i.test(queryLower);
-  if (wantsToothpaste) {
-    requiredInTitle = /zubn|pasta|tooth/i;
-    console.log('🦷 Intent: ZUBNÁ PASTA');
-  }
-
-  // === QUERY EXPANSION ===
-  let expandedQuery = query
-    .replace(/make\s*-?\s*up|makeup|mejkap|mejk[\s-]?ap/gi, 'makeup licenie dekorativna kozmetika ruz riasenka ocne tiene pery rteny podklad korektor mejkap ceruzka konturo puder')
-    .replace(/ruz\b/gi, 'ruz pery rteny rtenka')
-    .replace(/oci|tiena/gi, 'oci tiena ocne tiene paleta')
-    .replace(/riasenka/gi, 'riasenka mascara oci ocna')
-    .replace(/podklad|make-?up na tvar/gi, 'podklad foundation korektor concealer puder')
-    .replace(/peeling/gi, 'peeling exfoliacny scrub')
-    .replace(/sampon|šampón/gi, 'sampon samponovy vlasy');
-  
-  // Normalizuj query
-  const normalizedQuery = normalize(expandedQuery);
-  const queryTerms = normalizedQuery
-    .split(/\s+/)
-    .filter(w => w.length >= 2 && !STOPWORDS.has(w));
-  
-  console.log('🔤 Hľadané termy:', queryTerms);
-  
-  if (queryTerms.length === 0) {
-    return { products: [], total: 0, query };
-  }
-  
-  // Minimálne skóre = počet termov * 3 (aspoň každý term musí mať 1 zhodu)
-  const minScore = queryTerms.length * 3;
-  
-  // Detekcia cieľovej skupiny v dotaze
-  const forWomen = /(\bpre zeny\b|\bzeny\b|\bzena\b|\bzensky\b|\bdamsk)/i.test(normalizedQuery);
-  const forMen = /(\bpre muzov\b|\bmuzov\b|\bmuz\b|\bmuzsky\b|\bpansk)/i.test(normalizedQuery);
-  const forKids = /(\bpre deti\b|\bdeti\b|\bdetsk|\bdieta\b|\bbaby\b|\bbabat)/i.test(normalizedQuery);
-  
-  console.log('👥 Cieľová skupina:', { forWomen, forMen, forKids });
-  if (requiredInTitle) console.log('📌 Vyžadujem v názve:', requiredInTitle);
-  if (excludePatterns.length) console.log('🚫 Vylučujem vzory:', excludePatterns.length);
-  
-  // Bodovanie produktov
-  const scored = [];
+  // 2. Skóruj všetky produkty
+  const scoredProducts = [];
+  let filteredCount = 0;
   
   for (const product of products) {
-    // Preskoč nedostupné ak je filter
-    if (onlyAvailable && !product.available) continue;
-    
-    let score = 0;
-    const searchText = product.searchText || normalize(`${product.title} ${product.brand} ${product.description} ${product.category}`);
-    const titleNorm = normalize(product.title);
-    const titleLower = product.title.toLowerCase();
-    const brandNorm = normalize(product.brand || '');
-    const categoryNorm = normalize(product.category || product.categoryMain || '');
-    
-    // === HARD FILTRE - preskočiť produkty ktoré nespĺňajú požiadavky ===
-    
-    // Ak vyžadujeme určité slovo v názve, skontroluj
-    if (requiredInTitle && !requiredInTitle.test(titleLower) && !requiredInTitle.test(titleNorm)) {
-      continue; // Preskočiť produkty bez požadovaného slova
+    // Preskočiť nedostupné ak je filter
+    if (onlyAvailable && !product.available) {
+      filteredCount++;
+      continue;
     }
     
-    // Ak máme exclude patterns, skontroluj
-    if (excludePatterns.length > 0) {
-      const shouldExclude = excludePatterns.some(pattern => pattern.test(titleLower) || pattern.test(titleNorm));
-      if (shouldExclude) {
-        console.log(`❌ Vylúčený produkt: ${product.title}`);
-        continue;
-      }
+    const result = calculateProductScore(product, analysis);
+    
+    if (result.isFiltered) {
+      filteredCount++;
+      continue;
     }
     
-    // === SOFT FILTRE - bonus/penalizácia ===
+    // Minimálne skóre pre relevantné produkty
+    const minScore = analysis.productType ? 20 : 10;
     
-    // Bonus/penalizácia za kategóriu ak máme preferovanú kategóriu
-    if (preferredCategory) {
-      const categoryMatches = preferredCategory.test(categoryNorm) || preferredCategory.test(titleNorm);
-      if (categoryMatches) {
-        score += 50; // Veľký bonus za správnu kategóriu
-      } else if (wantsMakeup) {
-        // Ak hľadá makeup a produkt nie je v makeup kategórii, penalizuj
-        score -= 20;
-      }
-    }
-    
-    // Detekcia cieľovej skupiny produktu
-    const productForMen = /pre muzov|muzsky|men|man/.test(titleNorm);
-    const productForWomen = /pre zeny|zensky|women|woman|girl/.test(titleNorm);
-    const productForKids = /pre deti|detsk|kids|baby|dieta/.test(titleNorm);
-    
-    // Penalizácia za nezhodu cieľovej skupiny
-    if (forWomen && productForMen) continue; // Úplne preskočiť produkty pre mužov
-    if (forMen && productForWomen) continue; // Úplne preskočiť produkty pre ženy
-    if (forKids && !productForKids && (productForMen || productForWomen)) continue;
-    
-    for (const term of queryTerms) {
-      // Presná zhoda v title = 10 bodov
-      if (titleNorm.includes(term)) {
-        score += 10;
-        // Bonus ak je na začiatku
-        if (titleNorm.startsWith(term)) score += 5;
-      }
-      
-      // Zhoda v značke = 8 bodov
-      if (brandNorm.includes(term)) {
-        score += 8;
-      }
-      
-      // Zhoda v searchText (title + brand + description + category) = 3 body
-      if (searchText.includes(term)) {
-        score += 3;
-      }
-    }
-    
-    // Bonus za zhodu cieľovej skupiny
-    if (forWomen && productForWomen) score += 15;
-    if (forMen && productForMen) score += 15;
-    if (forKids && productForKids) score += 15;
-    
-    // Bonus za zľavu
-    if (product.hasDiscount) {
-      score += 1;
-    }
-    
-    // Pridaj len ak má dostatočné skóre
-    if (score >= minScore) {
-      scored.push({ product, score });
+    if (result.score >= minScore) {
+      scoredProducts.push({
+        product,
+        score: result.score,
+        breakdown: result.breakdown
+      });
     }
   }
   
-  // Zoraď podľa skóre
-  scored.sort((a, b) => b.score - a.score);
+  // 3. Zoraď podľa skóre (najvyššie prvé)
+  scoredProducts.sort((a, b) => b.score - a.score);
   
-  // Vráť top výsledky
-  const results = scored.slice(0, limit).map(s => ({
+  // 4. Vráť top výsledky
+  const results = scoredProducts.slice(0, limit).map(s => ({
     ...s.product,
-    _score: s.score
+    _score: s.score,
+    _breakdown: s.breakdown
   }));
   
-  console.log(`✅ Nájdených ${scored.length} produktov (min skóre: ${minScore}), vrátených ${results.length}`);
+  console.log('───────────────────────────────────────────────────────────');
+  console.log(`📊 VÝSLEDKY: ${scoredProducts.length} relevantných z ${products.length} (${filteredCount} odfiltrovaných)`);
+  
   if (results.length > 0) {
-    console.log('📋 Top výsledky:', results.slice(0, 3).map(p => `${p.title} (${p._score})`));
+    console.log('🏆 TOP VÝSLEDKY:');
+    results.forEach((p, i) => {
+      console.log(`   ${i+1}. ${p.title}`);
+      console.log(`      Skóre: ${p._score} | Typ: ${p._breakdown.productType} | Skupina: ${p._breakdown.targetGroup} | Problém: ${p._breakdown.problemSolving}`);
+    });
+  } else {
+    console.log('⚠️ Žiadne relevantné výsledky!');
   }
+  
+  console.log('═══════════════════════════════════════════════════════════');
   
   return {
     products: results,
-    total: scored.length,
+    total: scoredProducts.length,
     query: query,
-    terms: queryTerms
+    terms: analysis.searchTerms,
+    analysis: analysis,
+    needsClarification: analysis.needsClarification && results.length === 0,
+    clarificationQuestion: analysis.clarificationQuestion
   };
 }
 
