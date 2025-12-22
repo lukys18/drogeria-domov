@@ -26,7 +26,16 @@ const STATIC_INFO = {
     cas: 'Produkt bude doručený do 48 hodín.',
     postovne: 'Poštovné od 3,99€',
     dopravaZdarma: 'Doprava zdarma nad 100€ (do 20kg)',
+    sposoby: ['Kuriér SPS', 'Osobný odber (Hurbanovo)', 'Parcel Shop (Výdajné miesto)'],
     info: 'Rýchle a spoľahlivé doručenie priamo k vám domov.'
+  },
+  platba: {
+    sposoby: [
+      'Kreditná / debetná karta (Comgate)',
+      'Platba na dobierku (+ 1€)',
+      'Platba prevodom na účet'
+    ],
+    poznamka: 'V prípade spôsobu doručenia Parcel Shop, platba na dobierku nie je možná.'
   },
   darcekPriNakupe: {
     podmienka: 'Pri nákupe nad 40€',
@@ -68,6 +77,11 @@ INFORMÁCIE O OBCHODE (použite pri relevantných otázkach):
 - ${STATIC_INFO.dorucenie.cas}
 - ${STATIC_INFO.dorucenie.postovne}
 - ${STATIC_INFO.dorucenie.dopravaZdarma}
+- Spôsoby doručenia: ${STATIC_INFO.dorucenie.sposoby.join(', ')}
+
+💳 PLATBA:
+- ${STATIC_INFO.platba.sposoby.join('\n- ')}
+- Poznámka: ${STATIC_INFO.platba.poznamka}
 
 🎁 DARČEK PRI NÁKUPE:
 - ${STATIC_INFO.darcekPriNakupe.info}
@@ -506,6 +520,12 @@ function analyzeIntent(message) {
     return { type: 'static_info', infoType: 'ochranOsobnychUdajov' };
   }
   
+  // Platba / Spôsoby platby
+  if (/platb|plati|zaplati|karta|dobierka|prevod|comgate|ako.*zaplat|čím.*plat|cim.*plat/i.test(lower)) {
+    console.log('💳 Rozpoznaný zámer: platba');
+    return { type: 'static_info', infoType: 'platba' };
+  }
+  
   // Všeobecná otázka (nie o produktoch)
   if (/^(ako|čo|kto|kde|kedy|prečo)\s+(ste|si|to|je|funguje|robíte)/i.test(lower) && 
       !/produkt|tovar|predávate|máte/i.test(lower)) {
@@ -807,6 +827,7 @@ function buildMessages(message, history, context, intent) {
       'kontakt': 'KONTAKTNÉ ÚDAJE',
       'socialneMedia': 'SOCIÁLNE SIETE',
       'dorucenie': 'INFORMÁCIE O DORUČENÍ',
+      'platba': 'SPÔSOBY PLATBY',
       'darcekPriNakupe': 'DARČEK PRI NÁKUPE',
       'vratenieTovaru': 'VRÁTENIE TOVARU',
       'reklamacnyPoriadok': 'REKLAMAČNÝ PORIADOK',
