@@ -413,16 +413,28 @@ function analyzeIntent(message) {
   
   // Produktové kľúčové slová - ak sú prítomné, uprednostníme vyhľadávanie produktu
   const productKeywords = [
-    'šampón', 'mydlo', 'krém', 'parfém', 'dezodorant', 'zubná', 
-    'prací', 'čistiaci', 'makeup', 'rúž', 'sprchov',
-    'gel', 'pasta', 'pleť', 'ruky', 'tvár',
-    'prášok', 'aviváž', 'wc', 'toaletn', 'papier', 'utierky',
-    'hľadám', 'potrebujem', 'chcem', 'kúpiť', 'kúpi', 'produkt',
-    'jar', 'persil', 'ariel', 'nivea', 'dove', 'colgate', 'adidas', 'playboy', 'fa', 'palmolive' // značky
+    // Typy produktov
+    'šampón', 'sampon', 'mydlo', 'krém', 'krem', 'parfém', 'parfem', 'dezodorant', 'deodorant', 'zubná', 'zubna',
+    'prací', 'praci', 'čistiaci', 'cistiaci', 'makeup', 'rúž', 'ruz', 'sprchov',
+    'gel', 'pasta', 'pleť', 'plet', 'ruky', 'tvár', 'tvar',
+    'prášok', 'prasok', 'aviváž', 'avivaz', 'wc', 'toaletn', 'papier', 'utierky',
+    'antiperspirant', 'roll-on', 'sprej',
+    // Akčné slová
+    'hľadám', 'hladam', 'potrebujem', 'chcem', 'kúpiť', 'kupit', 'produkt',
+    // Značky (vrátane dvojslovných - normalizované)
+    'jar', 'persil', 'ariel', 'nivea', 'dove', 'colgate', 'adidas', 'playboy', 'fa', 'palmolive',
+    'old spice', 'oldspice', 'gillette', 'head shoulders', 'pantene', 'garnier', 'loreal',
+    'schwarzkopf', 'syoss', 'schauma', 'rexona', 'axe', 'oral-b', 'oralb',
+    'sensodyne', 'parodontax', 'ajax', 'domestos', 'pur', 'cif', 'vanish', 'savo',
+    'pampers', 'huggies', 'johnson', 'duracell', 'always', 'durex'
   ];
   
   const normalized = normalizeForSearch(message);
-  const hasProductKeyword = productKeywords.some(kw => lower.includes(kw) || normalized.includes(normalizeForSearch(kw)));
+  // Kontrola či správa obsahuje produktové kľúčové slovo
+  const hasProductKeyword = productKeywords.some(kw => {
+    const kwNorm = normalizeForSearch(kw);
+    return lower.includes(kw) || normalized.includes(kwNorm);
+  });
   
   // Zľavy/akcie - ALE ak obsahuje konkrétny produkt/značku, hľadáme produkt so zľavou
   if (/zlav|akci|výpredaj|lacn|znížen|promo/i.test(lower)) {
@@ -489,7 +501,11 @@ function analyzeIntent(message) {
   // Ak má produktové kľúčové slová (už definované vyššie)
   if (hasProductKeyword) {
     // Ak je len 1 slovo a nie je to značka, potrebuje spresnenie
-    const knownBrands = ['jar', 'persil', 'ariel', 'nivea', 'dove', 'colgate', 'adidas', 'playboy', 'fa', 'palmolive'];
+    const knownBrands = [
+      'jar', 'persil', 'ariel', 'nivea', 'dove', 'colgate', 'adidas', 'playboy', 'fa', 'palmolive',
+      'old', 'spice', 'oldspice', 'gillette', 'pantene', 'garnier', 'loreal', 'schwarzkopf', 'syoss',
+      'rexona', 'axe', 'head', 'shoulders', 'schauma', 'duracell', 'always', 'durex'
+    ];
     if (words.length === 1 && !knownBrands.some(b => lower.includes(b))) {
       console.log('📦 Rozpoznaný zámer: všeobecná kategória (potrebuje spresnenie)');
       return { type: 'general_category', needsMore: true };

@@ -216,18 +216,61 @@ function analyzeUserRequest(query) {
   }
   
   // === ZNAČKA ===
+  // Dvojslovné značky musia byť pred jednoslovnými (kvôli matchovaniu)
+  // Používame jednoduché patterny - normalizovaný text má medzery normalizované
   const brands = [
-    'nivea', 'dove', 'rexona', 'axe', 'adidas', 'playboy', 'fa', 'palmolive',
-    'head.*shoulders', 'pantene', 'garnier', 'loreal', 'schwarzkopf', 'syoss',
-    'colgate', 'oral[\s-]?b', 'sensodyne', 'parodontax',
-    'ariel', 'persil', 'jar', 'ajax', 'domestos', 'pur', 'cif', 'vanish',
-    'pampers', 'huggies', 'johnson', 'sudocrem'
+    // Dvojslovné značky (priorita) - hľadáme s medzerou alebo bez
+    { pattern: /old\s*spice/i, name: 'old spice' },
+    { pattern: /head\s*(and|&)?\s*shoulders/i, name: 'head shoulders' },
+    { pattern: /oral[\s-]?b/i, name: 'oral-b' },
+    { pattern: /dr\.?\s*beckmann/i, name: 'dr beckmann' },
+    { pattern: /king\s*c\b/i, name: 'king c' },
+    { pattern: /la\s*roche/i, name: 'la roche' },
+    { pattern: /calvin\s*klein/i, name: 'calvin klein' },
+    { pattern: /hugo\s*boss/i, name: 'hugo boss' },
+    // Jednoslovné značky
+    { pattern: /nivea/i, name: 'nivea' },
+    { pattern: /dove/i, name: 'dove' },
+    { pattern: /rexona/i, name: 'rexona' },
+    { pattern: /\baxe\b/i, name: 'axe' },
+    { pattern: /adidas/i, name: 'adidas' },
+    { pattern: /playboy/i, name: 'playboy' },
+    { pattern: /\bfa\b/i, name: 'fa' },
+    { pattern: /palmolive/i, name: 'palmolive' },
+    { pattern: /pantene/i, name: 'pantene' },
+    { pattern: /garnier/i, name: 'garnier' },
+    { pattern: /loreal|l'oreal/i, name: 'loreal' },
+    { pattern: /schwarzkopf/i, name: 'schwarzkopf' },
+    { pattern: /syoss/i, name: 'syoss' },
+    { pattern: /schauma/i, name: 'schauma' },
+    { pattern: /gliss/i, name: 'gliss' },
+    { pattern: /colgate/i, name: 'colgate' },
+    { pattern: /sensodyne/i, name: 'sensodyne' },
+    { pattern: /parodontax/i, name: 'parodontax' },
+    { pattern: /elmex/i, name: 'elmex' },
+    { pattern: /ariel/i, name: 'ariel' },
+    { pattern: /persil/i, name: 'persil' },
+    { pattern: /\bjar\b/i, name: 'jar' },
+    { pattern: /\bajax\b/i, name: 'ajax' },
+    { pattern: /domestos/i, name: 'domestos' },
+    { pattern: /\bpur\b/i, name: 'pur' },
+    { pattern: /\bcif\b/i, name: 'cif' },
+    { pattern: /vanish/i, name: 'vanish' },
+    { pattern: /\bsavo\b/i, name: 'savo' },
+    { pattern: /pampers/i, name: 'pampers' },
+    { pattern: /huggies/i, name: 'huggies' },
+    { pattern: /johnson/i, name: 'johnson' },
+    { pattern: /sudocrem/i, name: 'sudocrem' },
+    { pattern: /gillette/i, name: 'gillette' },
+    { pattern: /duracell/i, name: 'duracell' },
+    { pattern: /always/i, name: 'always' },
+    { pattern: /durex/i, name: 'durex' }
   ];
   
   for (const brand of brands) {
-    const regex = new RegExp(brand, 'i');
-    if (regex.test(normalized)) {
-      analysis.preferredBrand = brand.replace(/\[.*?\]/g, '').replace(/\\/g, '');
+    if (brand.pattern.test(normalized)) {
+      analysis.preferredBrand = brand.name;
+      console.log('🏷️ Detekovaná značka:', analysis.preferredBrand);
       break;
     }
   }
@@ -327,7 +370,7 @@ function calculateProductScore(product, analysis) {
     productLineMatch: 0, // max 30 - NOVÉ pre názov produktovej línie
     targetGroup: 0,      // max 25
     problemSolving: 0,   // max 15
-    brandMatch: 0,       // max 10
+    brandMatch: 0,       // max 15 - vylepšené matchovanie značky
     discount: 0,         // max 5
     availability: 0,     // max 5
     termMatches: 0,      // bonus za zhodu termov
@@ -474,11 +517,32 @@ function calculateProductScore(product, analysis) {
     }
   }
   
-  // === 4. ZHODA ZNAČKY (max 10 bodov) ===
+  // === 4. ZHODA ZNAČKY (max 15 bodov) - Vylepšené matchovanie ===
   if (analysis.preferredBrand) {
-    const brandPattern = new RegExp(analysis.preferredBrand, 'i');
-    if (brandPattern.test(brandNorm) || brandPattern.test(titleNorm)) {
-      breakdown.brandMatch = 10;
+    // Normalizuj značku pre porovnanie (odstráň medzery pre flexibilitu)
+    const brandClean = normalize(analysis.preferredBrand).replace(/\s+/g, '');
+    const brandWithSpace = normalize(analysis.preferredBrand);
+    
+    // Kontroluj v brand poli
+    const brandNormClean = brandNorm.replace(/\s+/g, '');
+    const titleNormClean = titleNorm.replace(/\s+/g, '');
+    
+    if (brandNorm.includes(brandWithSpace) || brandNormClean.includes(brandClean)) {
+      breakdown.brandMatch = 15; // Presná zhoda v brand poli
+    } else if (titleNorm.includes(brandWithSpace) || titleNormClean.includes(brandClean)) {
+      breakdown.brandMatch = 12; // Zhoda v názve produktu
+    } else {
+      // Skús jednotlivé slová značky
+      const brandWords = brandWithSpace.split(/\s+/).filter(w => w.length >= 3);
+      let matchedBrandWords = 0;
+      for (const bw of brandWords) {
+        if (titleNorm.includes(bw) || brandNorm.includes(bw)) {
+          matchedBrandWords++;
+        }
+      }
+      if (matchedBrandWords > 0 && brandWords.length > 0) {
+        breakdown.brandMatch = Math.round((matchedBrandWords / brandWords.length) * 10);
+      }
     }
   }
   
