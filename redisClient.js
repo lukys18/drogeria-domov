@@ -98,16 +98,23 @@ const ALL_BRANDS = new Set([
   'wunder baum', 'wunderbaum', 'zendium', 'zewa', 'ziaja', 'schwarzkopf'
 ]);
 
+// Krátke značky (1-3 znaky) - potrebujú presný word-boundary match
+const SHORT_BRANDS = new Set(['a+', 'ace', 'axe', 'bel', 'bu', 'cif', 'eos', 'fa', 'lux', 'ob', 'off', 'omo', 'pur', 'rex', 'ria', 'e']);
+
 // Funkcia pre kontrolu či slovo je značka
 function isBrand(word) {
   const normalized = normalize(word);
+  // Pre krátke značky - presná zhoda
+  if (normalized.length <= 3) {
+    return SHORT_BRANDS.has(normalized);
+  }
   return ALL_BRANDS.has(normalized);
 }
 
 // Funkcia pre nájdenie značky v texte
 function findBrandInText(text) {
   const normalized = normalize(text);
-  const words = normalized.split(/\s+/);
+  const words = normalized.split(/\s+/).filter(w => w.length >= 1);
   
   // Najprv skús dvojslovné značky
   for (let i = 0; i < words.length - 1; i++) {
@@ -117,16 +124,21 @@ function findBrandInText(text) {
     }
   }
   
-  // Potom jednoslovné
+  // Potom jednoslovné - ale pre krátke značky iba presná zhoda celého slova
   for (const word of words) {
-    if (word.length >= 2 && ALL_BRANDS.has(word)) {
+    // Krátke značky (1-3 znaky) - musí byť presná zhoda
+    if (word.length <= 3 && SHORT_BRANDS.has(word)) {
+      return word;
+    }
+    // Dlhšie značky (4+ znakov)
+    if (word.length >= 4 && ALL_BRANDS.has(word)) {
       return word;
     }
   }
   
-  // Skús aj bez medzier (oldspice, headshoulders)
+  // Skús aj bez medzier (oldspice, headshoulders) - ale len pre dlhšie značky
   for (const brand of ALL_BRANDS) {
-    if (brand.length >= 4 && normalized.includes(brand)) {
+    if (brand.length >= 5 && normalized.includes(brand)) {
       return brand;
     }
   }

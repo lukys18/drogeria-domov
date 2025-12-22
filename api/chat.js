@@ -215,19 +215,81 @@ export default async function handler(req, res) {
     reply = reply.replace(/[0]{20,}/g, '').trim();
     reply = reply.replace(/\n{3,}/g, '\n\n').trim();
 
-    // === JEDNODUCHÁ LOGIKA PRE ZOBRAZENIE PRODUKTOV ===
-    // Ak sme našli produkty, zobrazíme ich (pokiaľ AI explicitne nehovorí že nemáme)
+    // === INTELIGENTNÁ LOGIKA PRE ZOBRAZENIE PRODUKTOV ===
     let productsForDisplay = [];
     
     const replyLower = reply.toLowerCase();
     const aiExplicitlyNoProducts = /nemáme v ponuke|nemám v ponuke|žiaľ nemáme|bohužiaľ nemáme|nie je.*skladom|nemáme skladom/i.test(reply);
     
-    if (context.products?.length > 0) {
-      if (aiExplicitlyNoProducts) {
-        console.log('🚫 AI explicitne hovorí že produkty nemáme - nezobrazujem kartičky');
+    if (context.products?.length > 0 && !aiExplicitlyNoProducts) {
+      // Zisti koľko produktov AI skutočne odporučila v odpovedi
+      // Hľadáme produkty podľa ich názvu/značky v odpovedi
+      const matchedProducts = [];
+      
+      for (const product of context.products) {
+        const titleNorm = normalizeForSearch(product.title);
+        const brandNorm = normalizeForSearch(product.brand || '');
+        const replyNorm = normalizeForSearch(reply);
+        
+        // Produkt je "spomenutý" ak:
+        // 1. Jeho značka je v odpovedi
+        // 2. Aspoň 2 slová z názvu sú v odpovedi
+        // 3. Jeho cena je v odpovedi
+        let isMatched = false;
+        let matchScore = 0;
+        
+        // Zhoda značky
+        if (brandNorm.length >= 3 && replyNorm.includes(brandNorm)) {
+          matchScore += 30;
+        }
+        
+        // Zhoda slov z názvu
+        const titleWords = titleNorm.split(/\s+/).filter(w => w.length >= 4);
+        let wordMatches = 0;
+        for (const word of titleWords) {
+          if (replyNorm.includes(word)) {
+            wordMatches++;
+          }
+        }
+        if (wordMatches >= 2) {
+          matchScore += 20 * wordMatches;
+        }
+        
+        // Zhoda ceny
+        const priceStr = String(product.salePrice || product.price);
+        if (reply.includes(priceStr)) {
+          matchScore += 25;
+        }
+        
+        if (matchScore >= 30) {
+          matchedProducts.push({ product, matchScore });
+        }
+      }
+      
+      // Zoraď podľa skóre a vyber
+      matchedProducts.sort((a, b) => b.matchScore - a.matchScore);
+      
+      if (matchedProducts.length > 0) {
+        // Zobraz len produkty ktoré AI skutočne spomenula
+        productsForDisplay = matchedProducts.slice(0, 5).map(m => ({
+          id: m.product.id,
+          title: m.product.title,
+          price: m.product.price,
+          salePrice: m.product.salePrice,
+          hasDiscount: m.product.hasDiscount,
+          discountPercent: m.product.discountPercent,
+          image: m.product.image,
+          url: m.product.url,
+          brand: m.product.brand
+        }));
+        console.log(`✅ AI spomenula ${matchedProducts.length} produktov, zobrazujem ${productsForDisplay.length}`);
       } else {
-        // Zobraz všetky nájdené produkty (max 5)
-        productsForDisplay = context.products.slice(0, 5).map(p => ({
+        // Fallback: Ak AI neodpovedala štruktúrovane, zobraz top 1-3 podľa skóre vyhľadávania
+        // Počet závisí od toho či AI hovorí o viacerých produktoch
+        const mentionsMultiple = /produkty|niekoľko|viaceré|máme tieto|v ponuke máme/i.test(reply);
+        const displayCount = mentionsMultiple ? 3 : 1;
+        
+        productsForDisplay = context.products.slice(0, displayCount).map(p => ({
           id: p.id,
           title: p.title,
           price: p.price,
@@ -238,8 +300,10 @@ export default async function handler(req, res) {
           url: p.url,
           brand: p.brand
         }));
-        console.log(`✅ Zobrazujem ${productsForDisplay.length} produktových kartičiek`);
+        console.log(`✅ Fallback: zobrazujem top ${displayCount} produktov`);
       }
+    } else if (aiExplicitlyNoProducts) {
+      console.log('🚫 AI explicitne hovorí že produkty nemáme');
     }
 
     console.log('═══════════════════════════════════════════════════════════');
