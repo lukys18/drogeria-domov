@@ -242,6 +242,45 @@ function analyzeUserRequest(query) {
     .split(/\s+/)
     .filter(w => w.length >= 2 && !STOPWORDS.has(w));
   
+  // === PRODUCT LINE / VARIANT NAME ===
+  // Extrahuje názov produktovej línie (napr. "Dynamic Pulse", "Ice Dive", "Fresh Endurance")
+  // Toto je kľúčové pre vyhľadávanie konkrétnych variantov produktov
+  const productLinePatterns = [
+    // Dvojslovné názvy produktových línií (častejšie)
+    /\b([a-z]+\s+(?:pulse|dive|game|endurance|cool|fresh|power|active|sport|energy|intense|extreme|classic|original|pure|sensitive|invisible|black|white|gold|silver|platinum))\b/i,
+    // Reverzný pattern (prídavné meno + podstatné meno)
+    /\b((?:dynamic|ice|fresh|cool|pure|deep|active|sport|power|energy|intense|extreme|ocean|arctic|dark|night|day)\s+[a-z]+)\b/i
+  ];
+  
+  for (const pattern of productLinePatterns) {
+    const match = normalized.match(pattern);
+    if (match) {
+      analysis.productLineName = match[1].trim();
+      // Pridaj aj jednotlivé slová z produktovej línie do search terms ak tam ešte nie sú
+      const lineWords = analysis.productLineName.split(/\s+/);
+      for (const word of lineWords) {
+        if (word.length >= 3 && !analysis.searchTerms.includes(word)) {
+          analysis.searchTerms.push(word);
+        }
+      }
+      console.log('🏷️ Detekovaný názov produktovej línie:', analysis.productLineName);
+      break;
+    }
+  }
+  
+  // Ak nebol nájdený pattern, skús extrahovať slová ktoré nie sú značka ani typ produktu
+  if (!analysis.productLineName && analysis.preferredBrand) {
+    const wordsWithoutBrand = analysis.searchTerms.filter(w => 
+      !analysis.preferredBrand.includes(w) && 
+      w.length >= 4 &&
+      !['sprchov', 'sampon', 'dezodorant', 'krem', 'mydlo', 'parfem', 'gel'].some(t => w.includes(t))
+    );
+    if (wordsWithoutBrand.length > 0) {
+      analysis.productLineName = wordsWithoutBrand.join(' ');
+      console.log('🏷️ Extrahovaný potenciálny názov variantu:', analysis.productLineName);
+    }
+  }
+  
   // === POTREBUJE SPRESNENIE? ===
   // Ak nemáme pohlavie ale typ produktu ho vyžaduje
   const genderSensitiveProducts = ['dezodorant', 'parfém', 'sprchový gél'];
@@ -267,10 +306,11 @@ function analyzeUserRequest(query) {
 
 /**
  * Vypočíta skóre relevancie produktu voči požiadavke
- * Skóre 0-100 bodov
+ * Skóre 0-130 bodov
  * 
  * ROZLOŽENIE BODOV:
  * - 40 bodov: Zhoda typu produktu (kategória)
+ * - 30 bodov: Zhoda názvu produktovej línie (napr. "Dynamic Pulse")
  * - 25 bodov: Zhoda pohlavia/cieľovej skupiny
  * - 15 bodov: Riešenie špecifického problému (z description)
  * - 10 bodov: Zhoda značky (ak je preferovaná)
@@ -284,6 +324,7 @@ function analyzeUserRequest(query) {
 function calculateProductScore(product, analysis) {
   const breakdown = {
     productType: 0,      // max 40
+    productLineMatch: 0, // max 30 - NOVÉ pre názov produktovej línie
     targetGroup: 0,      // max 25
     problemSolving: 0,   // max 15
     brandMatch: 0,       // max 10
@@ -407,6 +448,32 @@ function calculateProductScore(product, analysis) {
     breakdown.problemSolving = Math.min(breakdown.problemSolving, 15);
   }
   
+  // === 3.5 ZHODA NÁZVU PRODUKTOVEJ LÍNIE (max 30 bodov) - NOVÉ! ===
+  // Toto je kľúčové pre vyhľadávanie konkrétnych variantov ako "Dynamic Pulse", "Ice Dive"
+  breakdown.productLineMatch = 0;
+  if (analysis.productLineName) {
+    const lineNorm = normalize(analysis.productLineName);
+    const lineWords = lineNorm.split(/\s+/).filter(w => w.length >= 3);
+    
+    // Celý názov línie v názve produktu = 30 bodov (maximálna relevancia)
+    if (titleNorm.includes(lineNorm)) {
+      breakdown.productLineMatch = 30;
+      console.log(`   🎯 Presná zhoda produktovej línie v názve: "${lineNorm}" -> ${product.title}`);
+    } else {
+      // Jednotlivé slová z názvu línie
+      let matchedWords = 0;
+      for (const word of lineWords) {
+        if (titleNorm.includes(word)) {
+          matchedWords++;
+        }
+      }
+      // Pomerné body za čiastočnú zhodu
+      if (matchedWords > 0 && lineWords.length > 0) {
+        breakdown.productLineMatch = Math.round((matchedWords / lineWords.length) * 25);
+      }
+    }
+  }
+  
   // === 4. ZHODA ZNAČKY (max 10 bodov) ===
   if (analysis.preferredBrand) {
     const brandPattern = new RegExp(analysis.preferredBrand, 'i');
@@ -457,6 +524,7 @@ function calculateProductScore(product, analysis) {
     breakdown.productType + 
     breakdown.targetGroup + 
     breakdown.problemSolving + 
+    (breakdown.productLineMatch || 0) +  // Nové - zhoda produktovej línie
     breakdown.brandMatch + 
     breakdown.discount + 
     breakdown.availability + 
@@ -518,6 +586,7 @@ export async function searchProducts(query, options = {}) {
   const analysis = analyzeUserRequest(query);
   
   console.log('🎯 Detekovaný typ produktu:', analysis.productType || 'neurčený');
+  console.log('🏷️ Produktová línia:', analysis.productLineName || 'neurčená');
   console.log('👤 Cieľová skupina:', analysis.targetGender || 'neurčená', '/', analysis.targetAgeGroup || 'neurčená');
   console.log('🔧 Problémy:', analysis.problems.length > 0 ? analysis.problems.join(', ') : 'žiadne');
   console.log('🏷️ Preferovaná značka:', analysis.preferredBrand || 'žiadna');
@@ -571,7 +640,7 @@ export async function searchProducts(query, options = {}) {
     console.log('🏆 TOP VÝSLEDKY:');
     results.forEach((p, i) => {
       console.log(`   ${i+1}. ${p.title}`);
-      console.log(`      Skóre: ${p._score} | Typ: ${p._breakdown.productType} | Skupina: ${p._breakdown.targetGroup} | Problém: ${p._breakdown.problemSolving}`);
+      console.log(`      Skóre: ${p._score} | Typ: ${p._breakdown.productType} | Línia: ${p._breakdown.productLineMatch || 0} | Značka: ${p._breakdown.brandMatch} | Termy: ${p._breakdown.termMatches}`);
     });
   } else {
     console.log('⚠️ Žiadne relevantné výsledky!');

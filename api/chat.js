@@ -411,16 +411,40 @@ function analyzeIntent(message) {
     return { type: 'conversation' };
   }
   
-  // Zľavy/akcie
+  // Produktové kľúčové slová - ak sú prítomné, uprednostníme vyhľadávanie produktu
+  const productKeywords = [
+    'šampón', 'mydlo', 'krém', 'parfém', 'dezodorant', 'zubná', 
+    'prací', 'čistiaci', 'makeup', 'rúž', 'sprchov',
+    'gel', 'pasta', 'pleť', 'ruky', 'tvár',
+    'prášok', 'aviváž', 'wc', 'toaletn', 'papier', 'utierky',
+    'hľadám', 'potrebujem', 'chcem', 'kúpiť', 'kúpi', 'produkt',
+    'jar', 'persil', 'ariel', 'nivea', 'dove', 'colgate', 'adidas', 'playboy', 'fa', 'palmolive' // značky
+  ];
+  
+  const normalized = normalizeForSearch(message);
+  const hasProductKeyword = productKeywords.some(kw => lower.includes(kw) || normalized.includes(normalizeForSearch(kw)));
+  
+  // Zľavy/akcie - ALE ak obsahuje konkrétny produkt/značku, hľadáme produkt so zľavou
   if (/zlav|akci|výpredaj|lacn|znížen|promo/i.test(lower)) {
-    console.log('💰 Rozpoznaný zámer: zľavy');
+    // Ak obsahuje aj produktové kľúčové slovo, hľadaj konkrétny produkt (so zľavou)
+    if (hasProductKeyword || words.length >= 3) {
+      console.log('💰🔍 Rozpoznaný zámer: hľadanie konkrétneho produktu v akcii');
+      return { type: 'specific_search', wantsDiscount: true };
+    }
+    console.log('💰 Rozpoznaný zámer: všeobecné zľavy');
     return { type: 'discounts' };
   }
   
   // Kategórie
-  if (/kategór|sortiment|ponuk|máte|čo predávate/i.test(lower)) {
+  if (/kategór|sortiment|ponuk|čo predávate/i.test(lower) && !hasProductKeyword) {
     console.log('📂 Rozpoznaný zámer: kategórie');
     return { type: 'categories' };
+  }
+  
+  // "máte" + konkrétny produkt = hľadanie produktu
+  if (/máte|mate/i.test(lower) && hasProductKeyword) {
+    console.log('🔍 Rozpoznaný zámer: dotaz na dostupnosť konkrétneho produktu');
+    return { type: 'specific_search' };
   }
   
   // Značky
@@ -457,26 +481,16 @@ function analyzeIntent(message) {
     (words.length <= 2 && normalized.includes(cat))
   );
   
-  if (isBroadCategory && words.length <= 2) {
+  if (isBroadCategory && words.length <= 2 && !hasProductKeyword) {
     console.log('📦 Rozpoznaný zámer: široká kategória - potrebuje spresnenie');
     return { type: 'broad_category', needsMore: true, category: lower };
   }
   
-  // Produktové kľúčové slová - jasne hľadá konkrétny produkt
-  const productKeywords = [
-    'šampón', 'mydlo', 'krém', 'parfém', 'dezodorant', 'zubná', 
-    'prací', 'čistiaci', 'makeup', 'rúž', 'sprchov',
-    'gel', 'pasta', 'pleť', 'ruky', 'tvár',
-    'prášok', 'aviváž', 'wc', 'toaletn', 'papier', 'utierky',
-    'hľadám', 'potrebujem', 'chcem', 'kúpiť', 'kúpi', 'produkt',
-    'jar', 'persil', 'ariel', 'nivea', 'dove', 'colgate' // značky
-  ];
-  
-  const hasProductKeyword = productKeywords.some(kw => lower.includes(kw) || normalized.includes(normalizeForSearch(kw)));
-  
+  // Ak má produktové kľúčové slová (už definované vyššie)
   if (hasProductKeyword) {
     // Ak je len 1 slovo a nie je to značka, potrebuje spresnenie
-    if (words.length === 1 && !['jar', 'persil', 'ariel', 'nivea', 'dove', 'colgate'].some(b => lower.includes(b))) {
+    const knownBrands = ['jar', 'persil', 'ariel', 'nivea', 'dove', 'colgate', 'adidas', 'playboy', 'fa', 'palmolive'];
+    if (words.length === 1 && !knownBrands.some(b => lower.includes(b))) {
       console.log('📦 Rozpoznaný zámer: všeobecná kategória (potrebuje spresnenie)');
       return { type: 'general_category', needsMore: true };
     }
