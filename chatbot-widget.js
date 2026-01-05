@@ -46,9 +46,9 @@
       return {
         openWidth: `${vw - 10}px`,
         openHeight: `${Math.min(vh * 0.75, 600)}px`,
-        closedWidth: "60px",
-        closedHeight: "60px",
-        bottom: "5px",
+        closedWidth: "40px",
+        closedHeight: "40px",
+        bottom: "70px",
         right: "5px",
         left: "5px"
       };
@@ -57,9 +57,9 @@
       return {
         openWidth: `${vw - 20}px`,
         openHeight: `${Math.min(vh * 0.7, 580)}px`,
-        closedWidth: "60px", 
-        closedHeight: "60px",
-        bottom: "10px",
+        closedWidth: "40px", 
+        closedHeight: "40px",
+        bottom: "70px",
         right: "10px",
         left: "10px"
       };
