@@ -2,17 +2,18 @@
   if (window.marcelChatbotLoaded) return;
   window.marcelChatbotLoaded = true;
 
-  // Vercel URL - ZMENIŤ LEN TU
-  const VERCEL_URL = "https://drogeria-domov.vercel.app";
+  function initChatbot() {
+    // Vercel URL - ZMENIŤ LEN TU
+    const VERCEL_URL = "https://drogeria-domov.vercel.app";
 
-  // Povolene domény
-  const allowed = ["ragnetiq.com", "www.drogeriadomov.sk"];
-  if (!allowed.includes(window.location.hostname)) {
-    console.warn("Tento widget nie je povolený na tejto doméne");
-    return; // NEvytvára iframe
-  }
+    // Povolene domény
+    const allowed = ["ragnetiq.com", "www.drogeriadomov.sk"];
+    if (!allowed.includes(window.location.hostname)) {
+      console.warn("Tento widget nie je povolený na tejto doméne");
+      return; // NEvytvára iframe
+    }
 
-  const iframe = document.createElement("iframe");
+    const iframe = document.createElement("iframe");
   iframe.src = VERCEL_URL;
   iframe.style.position = "fixed";
   iframe.style.bottom = "20px";
@@ -136,4 +137,12 @@
 
   // Nastaví počiatočné responzívne veľkosti
   applyResponsiveSizes(false);
+  }
+
+  // Spustí chatbot až po načítaní DOM
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initChatbot);
+  } else {
+    initChatbot();
+  }
 })();
