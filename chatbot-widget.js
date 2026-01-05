@@ -49,7 +49,7 @@
         closedWidth: "40px",
         closedHeight: "40px",
         bottom: "70px",
-        right: "5px",
+        right: "20px",
         left: "5px"
       };
     } else if (vw <= 768) {
@@ -60,7 +60,7 @@
         closedWidth: "40px", 
         closedHeight: "40px",
         bottom: "70px",
-        right: "10px",
+        right: "20px",
         left: "10px"
       };
     } else {
