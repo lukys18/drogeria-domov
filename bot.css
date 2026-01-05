@@ -777,6 +777,17 @@ button:active {
     right: 10px;
   }
   
+  body:not(.iframe-mode) #chatbot-container.closed #chatbot-header-closed {
+    width: 40px;
+    height: 40px;
+  }
+  
+  body:not(.iframe-mode) #chatbot-container.closed #toggle-icon {
+    font-size: 16px;
+    width: 18px;
+    height: 18px;
+  }
+  
   /* V iframe režime - VŽDY desktop veľkosti */
   body.iframe-mode #chatbot-container {
     position: absolute !important;
@@ -867,6 +878,17 @@ button:active {
     width: 60px;
     height: 60px;
     right: 5px;
+  }
+  
+  body:not(.iframe-mode) #chatbot-container.closed #chatbot-header-closed {
+    width: 40px;
+    height: 40px;
+  }
+  
+  body:not(.iframe-mode) #chatbot-container.closed #toggle-icon {
+    font-size: 14px;
+    width: 16px;
+    height: 16px;
   }
   
   /* V iframe režime - VŽDY desktop veľkosti */
