@@ -16,7 +16,7 @@
     const iframe = document.createElement("iframe");
   iframe.src = VERCEL_URL;
   iframe.style.position = "fixed";
-  iframe.style.bottom = "20px";
+  iframe.style.bottom = "70px";
   iframe.style.right = "20px";
   iframe.style.width = "60px"; // Začína zatvorený
   iframe.style.height = "60px"; // Začína zatvorený
@@ -70,7 +70,7 @@
         openHeight: "600px",
         closedWidth: "60px",
         closedHeight: "60px", 
-        bottom: "20px",
+        bottom: "70px",
         right: "20px",
         left: "auto"
       };
