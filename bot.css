@@ -314,6 +314,29 @@ body.iframe-mode #chatbot-container.closed #chatbot-header-closed {
   pointer-events: none;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+#reset-icon {
+  font-size: 16px;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.2s ease, transform 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+}
+
+#reset-icon:hover {
+  opacity: 1;
+  transform: rotate(180deg);
+}
+
 #toggle-icon {
   font-size: 20px;
   font-weight: 300;
@@ -328,6 +351,7 @@ body.iframe-mode #chatbot-container.closed #chatbot-header-closed {
   flex-shrink: 0;
   width: 24px;
   height: 24px;
+  cursor: pointer;
 }
 
 #chatbot-container:not(.closed) #toggle-icon {

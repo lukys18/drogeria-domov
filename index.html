@@ -32,7 +32,10 @@
         </div>
       </div>
       
-      <span id="toggle-icon">+</span>
+      <div class="header-actions">
+        <span id="reset-icon" onclick="resetChatbot(event)" title="Nová konverzácia"><i class="fas fa-rotate-right"></i></span>
+        <span id="toggle-icon">−</span>
+      </div>
     </div>
 
     <!-- Header pre zatvorený stav -->
@@ -182,6 +185,44 @@
           window.parent.postMessage({ type: "chatbot-opened" }, "*");
         }
       }
+    }
+
+    function resetChatbot(event) {
+      // Zabráň propagovaniu kliknutia na header (aby sa chatbot nezatvoril)
+      event.stopPropagation();
+      
+      // Ukonči aktuálnu session ak je aktívna
+      if (sessionActive) {
+        endSession();
+      }
+      
+      // Generuj nové session ID
+      generateNewSessionId();
+      
+      // Vymaž históriu konverzácie
+      chatHistory = [];
+      
+      // Reset email flag
+      emailSubmittedInSession = false;
+      
+      // Vymaž všetky správy z chatboxu
+      chatbox.innerHTML = '';
+      
+      // Pridaj úvodnú správu znovu
+      appendMessage("Drogéria Domov", "Dobrý deň! Som váš virtuálny asistent pre Drogériu Domov. Pomôžem vám nájsť produkty, poradím s výberom alebo zodpoviem vaše otázky. Čo pre vás môžem urobiť?", "bot", false, false, false);
+      
+      // Pridaj Quick Reply buttony
+      const quickRepliesDiv = document.createElement('div');
+      quickRepliesDiv.className = 'quick-replies';
+      quickRepliesDiv.innerHTML = `
+        <button class="quick-reply-btn" onclick="handleQuickReply('Hľadám niečo na upratovanie')">Upratovanie</button>
+        <button class="quick-reply-btn" onclick="handleQuickReply('Potrebujem kozmetiku')">Kozmetika</button>
+        <button class="quick-reply-btn" onclick="handleQuickReply('Hľadám prací prášok')">Pranie</button>
+        <button class="quick-reply-btn" onclick="handleQuickReply('Potrebujem niečo pre domácnosť')">Domácnosť</button>
+      `;
+      chatbox.appendChild(quickRepliesDiv);
+      
+      console.log('🔄 Chatbot reset - nové session ID:', sessionId);
     }
 
     function createContactForm() {
