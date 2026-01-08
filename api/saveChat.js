@@ -180,6 +180,36 @@ export default async function handler(req, res) {
           return res.status(400).json({ error: 'sessionId required' });
         }
 
+        // Najprv získame session a skontrolujeme počet správ
+        const { data: session, error: fetchError } = await supabase
+          .from('chat_sessions')
+          .select('total_messages')
+          .eq('id', sessionId)
+          .single();
+
+        if (fetchError) {
+          // Session neexistuje - to je OK
+          if (fetchError.code === 'PGRST116') {
+            console.log('📊 [Analytics] Session not found (already deleted or never created):', sessionId);
+            return res.status(200).json({ success: true, deleted: true });
+          }
+          throw fetchError;
+        }
+
+        // Ak session má 0 správ, zmažeme ju namiesto uloženia
+        if (!session || session.total_messages === 0) {
+          const { error: deleteError } = await supabase
+            .from('chat_sessions')
+            .delete()
+            .eq('id', sessionId);
+
+          if (deleteError) throw deleteError;
+
+          console.log('📊 [Analytics] Empty session deleted:', sessionId, '(0 messages)');
+          return res.status(200).json({ success: true, deleted: true });
+        }
+
+        // Session má správy - normálne ukončíme
         const updateData = {
           ended_at: new Date().toISOString()
         };
