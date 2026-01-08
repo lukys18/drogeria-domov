@@ -51,6 +51,23 @@ function getSupabase() {
   return createClient(supabaseUrl, supabaseKey);
 }
 
+/**
+ * Handler pre uloženie feedback (palec hore/dole)
+ * @param {Object} supabase - Supabase client
+ * @param {Object} data - Request data
+ * @returns {Promise<Object>} - Result object
+ */
+async function handleFeedback(supabase, data) {
+  const { sessionId, feedbackValue } = data;
+  const { data: updated, error } = await supabase
+    .from('chat_sessions')
+    .update({ feedback: feedbackValue })
+    .eq('id', sessionId)
+    .select();
+  if (error) throw error;
+  return { action: 'feedback_saved', data: updated };
+}
+
 export default async function handler(req, res) {
   // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -360,8 +377,27 @@ export default async function handler(req, res) {
         return res.status(200).json({ success: true });
       }
 
+      // ═══════════════════════════════════════════════════════════════════
+      // FEEDBACK
+      // ═══════════════════════════════════════════════════════════════════
+
+      case 'feedback': {
+        if (!req.body.feedbackValue) {
+          return res.status(400).json({ 
+            error: 'Bad request',
+            message: 'feedbackValue is required for feedback action' 
+          });
+        }
+        const result = await handleFeedback(supabase, req.body);
+        console.log('📊 [Analytics] Feedback saved:', req.body.sessionId, req.body.feedbackValue);
+        return res.status(200).json({ success: true, result });
+      }
+
       default:
-        return res.status(400).json({ error: 'Unknown action: ' + action });
+        return res.status(400).json({ 
+          error: 'Unknown action: ' + action,
+          validActions: 'session_start, session_update, session_end, product_recommendation, product_click, email_submitted, feedback'
+        });
     }
 
   } catch (error) {

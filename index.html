@@ -71,6 +71,7 @@
     let sessionId = null;
     let messageIndex = 0;
     let emailSubmittedInSession = false; // Track if email was submitted in this session
+    let feedbackShownInSession = false; // Track if feedback widget was shown in this session
     let sessionActive = false; // Czy session je aktívna (chatbot otvorený a užívateľ písal)
     let sessionStartTime = null; // Časovač pre dĺžku session
 
@@ -169,6 +170,9 @@
           generateNewSessionId();
         }
         
+        // Reset feedback flag
+        feedbackShownInSession = false;
+        
         openHeader.style.display = "none";
         closedHeader.style.display = "block";
         // Informuj parent o zatvorení
@@ -204,6 +208,9 @@
       
       // Reset email flag
       emailSubmittedInSession = false;
+      
+      // Reset feedback flag
+      feedbackShownInSession = false;
       
       // Vymaž všetky správy z chatboxu
       chatbox.innerHTML = '';
@@ -322,7 +329,98 @@
       return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-   
+    /**
+     * Zobrazí feedback widget s palcom hore/dole
+     */
+    function showFeedbackWidget() {
+      // Ak už bol feedback zobrazený v tejto session, nevytvorme ho znova
+      if (feedbackShownInSession) {
+        return;
+      }
+      
+      feedbackShownInSession = true;
+      
+      const feedbackDiv = document.createElement('div');
+      feedbackDiv.className = 'feedback-widget';
+      feedbackDiv.id = 'feedback-widget';
+      feedbackDiv.innerHTML = `
+        <div class="feedback-content">
+          <p class="feedback-question">Pomohol som vám?</p>
+          <div class="feedback-buttons">
+            <button class="feedback-btn feedback-positive" onclick="submitFeedback('positive')" title="Áno, pomohol">
+              <i class="fas fa-thumbs-up"></i>
+            </button>
+            <button class="feedback-btn feedback-negative" onclick="submitFeedback('negative')" title="Nie, nepomohol">
+              <i class="fas fa-thumbs-down"></i>
+            </button>
+          </div>
+        </div>
+      `;
+      
+      chatbox.appendChild(feedbackDiv);
+      chatbox.scrollTop = chatbox.scrollHeight;
+      
+      // Auto-hide po 10 sekundách
+      setTimeout(() => {
+        const widget = document.getElementById('feedback-widget');
+        if (widget && !widget.classList.contains('feedback-submitted')) {
+          widget.classList.add('feedback-hiding');
+          setTimeout(() => {
+            if (widget && widget.parentNode) {
+              widget.parentNode.removeChild(widget);
+            }
+          }, 300);
+        }
+      }, 10000);
+    }
+
+    /**
+     * Odošle feedback na server
+     * @param {string} value - 'positive' alebo 'negative'
+     */
+    async function submitFeedback(value) {
+      const widget = document.getElementById('feedback-widget');
+      if (!widget || widget.classList.contains('feedback-submitted')) {
+        return;
+      }
+      
+      widget.classList.add('feedback-submitted');
+      
+      // Odošli na server
+      try {
+        await fetch(ANALYTICS_API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'feedback',
+            sessionId: getSessionId(),
+            feedbackValue: value
+          })
+        });
+        
+        console.log('📊 [Analytics] Feedback submitted:', value);
+      } catch (e) {
+        console.warn('📊 [Analytics] Failed to submit feedback:', e.message);
+      }
+      
+      // Zobraz thank you správu
+      widget.innerHTML = `
+        <div class="feedback-content feedback-thankyou">
+          <i class="fas fa-check-circle"></i>
+          <p>Ďakujeme za spätnú väzbu!</p>
+        </div>
+      `;
+      
+      // Auto-hide po 2 sekundách
+      setTimeout(() => {
+        widget.classList.add('feedback-hiding');
+        setTimeout(() => {
+          if (widget && widget.parentNode) {
+            widget.parentNode.removeChild(widget);
+          }
+        }, 300);
+      }, 2000);
+    }
 
 async function sendMessage() {
   const message = inputField.value.trim();
@@ -404,6 +502,11 @@ async function sendMessage() {
 
     // 📊 ANALYTICS: Aktualizuj session s konverzáciou
     updateSessionAnalytics(currentMessageIndex, products.length > 0, message, reply);
+    
+    // Zobraz feedback widget po prvej odpovedi
+    if (messageIndex === 1) {
+      setTimeout(() => showFeedbackWidget(), 500);
+    }
 
   } catch (error) {
     console.error("❌ Chyba pri spracovaní:", error);
