@@ -340,6 +340,7 @@
       
       feedbackShownInSession = true;
       
+      const container = document.getElementById('chatbot-container');
       const feedbackDiv = document.createElement('div');
       feedbackDiv.className = 'feedback-widget';
       feedbackDiv.id = 'feedback-widget';
@@ -357,8 +358,7 @@
         </div>
       `;
       
-      chatbox.appendChild(feedbackDiv);
-      chatbox.scrollTop = chatbox.scrollHeight;
+      container.appendChild(feedbackDiv);
       
       // Auto-hide po 10 sekundách
       setTimeout(() => {
