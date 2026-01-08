@@ -110,8 +110,8 @@
       // Pre-fetch geo city for faster first message
       getGeoCity();
       
-      // Zobrazenie úvodnej správy
-      appendMessage("Drogéria Domov", "Dobrý deň! Som váš virtuálny asistent pre Drogériu Domov. Pomôžem vám nájsť produkty, poradím s výberom alebo zodpoviem vaše otázky. Čo pre vás môžem urobiť?", "bot", false, false, false);
+      // Zobrazenie úvodnej správy s GDPR linkom
+      appendMessage("Drogéria Domov", "Dobrý deň! Som váš virtuálny asistent pre Drogériu Domov. Pomôžem vám nájsť produkty, poradím s výberom alebo zodpoviem vaše otázky. Čo pre vás môžem urobiť?<span style='display:block;text-align:right;margin-top:8px;'><a href='https://ragnetiq.com/gdpr' target='_blank' style='font-size:9px;color:#999;text-decoration:none;'>GDPR</a></span>", "bot", false, false, false);
       const quickRepliesDiv = document.createElement('div');
       quickRepliesDiv.className = 'quick-replies';
       quickRepliesDiv.innerHTML = `
@@ -208,8 +208,8 @@
       // Vymaž všetky správy z chatboxu
       chatbox.innerHTML = '';
       
-      // Pridaj úvodnú správu znovu
-      appendMessage("Drogéria Domov", "Dobrý deň! Som váš virtuálny asistent pre Drogériu Domov. Pomôžem vám nájsť produkty, poradím s výberom alebo zodpoviem vaše otázky. Čo pre vás môžem urobiť?", "bot", false, false, false);
+      // Pridaj úvodnú správu znovu s GDPR linkom
+      appendMessage("Drogéria Domov", "Dobrý deň! Som váš virtuálny asistent pre Drogériu Domov. Pomôžem vám nájsť produkty, poradím s výberom alebo zodpoviem vaše otázky. Čo pre vás môžem urobiť?<span style='display:block;text-align:right;margin-top:8px;'><a href='https://ragnetiq.com/gdpr' target='_blank' style='font-size:9px;color:#999;text-decoration:none;'>GDPR</a></span>", "bot", false, false, false);
       
       // Pridaj Quick Reply buttony
       const quickRepliesDiv = document.createElement('div');
