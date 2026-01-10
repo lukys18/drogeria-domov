@@ -56,6 +56,12 @@ const STATIC_INFO = {
   ochranOsobnychUdajov: {
     url: 'https://informovanie.osobnyudaj.sk/51468221/gdpr/sk/zakladne-informacie',
     info: 'Vaše osobné údaje spracúvame v súlade s GDPR.'
+  },
+  objednavky: {
+    info: 'CHATBOT NEMÁ PRÍSTUP K OBJEDNÁVKAM. Pre informácie o stave objednávky kontaktujte zákaznícky servis.',
+    kontaktEmail: 'eshop@drogeriadomov.sk',
+    kontaktTelefon: '+421 35 2023333',
+    poznamka: 'Chatbot vie pomôcť len s výberom produktov a informáciami o obchode.'
   }
 };
 
@@ -180,7 +186,14 @@ function enhanceQueryFromHistory(message, history, intent) {
 // Systémový prompt pre inteligentného konverzačného asistenta
 const SYSTEM_PROMPT_BASE = `Si priateľský a inteligentný asistent online drogérie Drogéria Domov (drogeriadomov.sk).
 
-⚠️ NAJDÔLEŽITEJŠIE PRAVIDLO - NIKDY HO NEPORUŠUJ ⚠️
+🚫 ABSOLÚTNE ZAKÁZANÉ - NIKDY NEPORUŠUJ 🚫
+1. NEMÁŠ PRÍSTUP K OBJEDNÁVKAM! Nevieš nič o objednávkach zákazníkov, ich stave, histórii ani obsahu.
+2. NIKDY sa NETVÁR že hľadáš v databáze objednávok - žiadnu takú nemáš!
+3. NIKDY nevymýšľaj čísla objednávok, stavy doručenia, ani žiadne informácie o objednávkach.
+4. Ak sa zákazník pýta na stav objednávky, povedz: "Bohužiaľ, nemám prístup k systému objednávok. Pre informácie o vašej objednávke prosím kontaktujte zákaznícky servis na ${STATIC_INFO.kontakt.email} alebo ${STATIC_INFO.kontakt.telefon}."
+5. Pri dotazoch na objednávky alebo kontakt NEODPORÚČAJ produkty!
+
+⚠️ ĎALŠIE KRITICKÉ PRAVIDLO ⚠️
 Môžeš hovoriť IBA o produktoch ktoré vidíš v sekcii "NÁJDENÉ PRODUKTY" nižšie.
 Ak tam NIE JE žiadny produkt ktorý by vyhovoval požiadavke zákazníka:
 - NEPÍŠ názov produktu ktorý tam nie je
@@ -193,6 +206,7 @@ Ak tam NIE JE žiadny produkt ktorý by vyhovoval požiadavke zákazníka:
 2. NEPÍŠ URL odkazy - produkty sa zobrazia automaticky ako klikateľné kartičky pod tvojou odpoveďou.
 3. ODPORÚČAJ LEN KATEGÓRIE Z POSKYTNUTÉHO ZOZNAMU - nevymýšľaj si vlastné kategórie!
 4. Používaj PRESNÉ názvy produktov ako sú v zozname - nemeň ich!
+5. Pri dotazoch na OBJEDNÁVKY, KONTAKT, REKLAMÁCIE alebo VRÁTENIE TOVARU - NEODPORÚČAJ produkty, len odpovedz na otázku!
 
 INTELIGENTNÉ ODPORÚČANIE:
 1. Analyzuj potreby zákazníka (typ produktu, problém, pohlavie, vek)
@@ -472,6 +486,12 @@ function analyzeIntent(message) {
   // STATICKÉ INFORMÁCIE - kontakt, doručenie, vrátenie, reklamácie, GDPR atď.
   // ═══════════════════════════════════════════════════════════════════════════
   
+  // Stav objednávky - NEMÁME K TOMU PRÍSTUP
+  if (/objednáv|objednav|moja.*objednáv|moja.*objednav|stav.*objednáv|stav.*objednav|kde.*je.*objednáv|kde.*je.*objednav|kedy.*príde|kedy.*pride|sledovat.*zasielk|sledova.*balik|tracking|číslo.*objednáv|cislo.*objednav/i.test(lower)) {
+    console.log('📦 Rozpoznaný zámer: stav objednávky (NEMÁME PRÍSTUP)');
+    return { type: 'static_info', infoType: 'objednavky' };
+  }
+  
   // Kontakt
   if (/kontakt|telefón|telefon|email|e-mail|adresa|kde.*ste|kde.*nájdem|kde.*najdem|otvárac|otvarac|hodiny|kedy.*otvoren/i.test(lower)) {
     console.log('📞 Rozpoznaný zámer: kontakt');
@@ -695,6 +715,11 @@ async function buildContext(message, intent) {
         console.log('📋 Statické info - typ:', intent.infoType);
         context.staticInfo = STATIC_INFO;
         context.staticInfoType = intent.infoType;
+        // Pri objednávkach NIKDY nehľadáme produkty
+        if (intent.infoType === 'objednavky') {
+          console.log('🚫 Dotaz na objednávky - NEBUDEME hľadať produkty');
+          context.noProductsAllowed = true;
+        }
         break;
       
       case 'thanks':
@@ -832,10 +857,30 @@ function buildMessages(message, history, context, intent) {
       'vratenieTovaru': 'VRÁTENIE TOVARU',
       'reklamacnyPoriadok': 'REKLAMAČNÝ PORIADOK',
       'obchodnePodmienky': 'OBCHODNÉ PODMIENKY',
-      'ochranOsobnychUdajov': 'OCHRANA OSOBNÝCH ÚDAJOV'
+      'ochranOsobnychUdajov': 'OCHRANA OSOBNÝCH ÚDAJOV',
+      'objednavky': 'STAV OBJEDNÁVKY (NEMÁME PRÍSTUP)'
     };
     
-    contextMessage = `ZÁKAZNÍK SA PÝTA NA: ${infoLabels[context.staticInfoType] || context.staticInfoType}
+    // Špeciálne inštrukcie pre objednávky
+    if (context.staticInfoType === 'objednavky') {
+      contextMessage = `🚫 ZÁKAZNÍK SA PÝTA NA STAV OBJEDNÁVKY
+
+KRITICKY DÔLEŽITÉ:
+- NEMÁŠ PRÍSTUP K SYSTÉMU OBJEDNÁVOK!
+- NIKDY nevymýšľaj čísla objednávok, stavy doručenia ani žiadne informácie o objednávkach
+- NIKDY sa netvárkaj že hľadáš v databáze - žiadnu takú nemáš!
+- NEODPORÚČAJ produkty v tejto odpovedi!
+
+TVOJA ODPOVEĎ MUSÍ BYŤ:
+"Bohužiaľ, nemám prístup k systému objednávok a neviem zistiť stav vašej objednávky. 
+Pre informácie o vašej objednávke prosím kontaktujte náš zákaznícky servis:
+📧 Email: ${STATIC_INFO.kontakt.email}
+📞 Telefón: ${STATIC_INFO.kontakt.telefon}
+🕐 Pracovná doba: ${STATIC_INFO.kontakt.otvaracieHodiny}"
+
+Môžeš to preformulovať, ale NIKDY nesľubuj že zistíš stav objednávky!`;
+    } else {
+      contextMessage = `ZÁKAZNÍK SA PÝTA NA: ${infoLabels[context.staticInfoType] || context.staticInfoType}
 
 RELEVANTNÉ INFORMÁCIE:
 ${JSON.stringify(info, null, 2)}
@@ -843,7 +888,9 @@ ${JSON.stringify(info, null, 2)}
 INŠTRUKCIE:
 - Odpovedz priateľsky a stručne na základe týchto informácií
 - Ak je k dispozícii URL odkaz, môžeš ho zákazníkovi poskytnúť
+- NEODPORÚČAJ produkty pri týchto dotazoch - zákazník sa pýta na služby/informácie
 - Ponúkni ďalšiu pomoc ak je to vhodné`;
+    }
   } else if (context.stats) {
     contextMessage = `INFORMÁCIE O OBCHODE:
 - Počet produktov: ${context.stats.productCount}
