@@ -240,6 +240,7 @@ DÔLEŽITÉ PRE ODPORÚČANIE:
 - Ak má produkt ZĽAVU, zdôrazni pôvodnú a zľavnenú cenu
 - Produkty sa automaticky zobrazia ako klikateľné kartičky pod tvojou odpoveďou
 
+
 Odpovedaj VŽDY po slovensky, priateľsky a stručne.`;
 
 export default async function handler(req, res) {
